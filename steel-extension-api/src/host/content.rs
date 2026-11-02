@@ -2,8 +2,10 @@
 
 mod biome;
 mod definition;
+mod entity;
 mod fluid;
 pub(crate) use biome::register_biome;
+pub(crate) use entity::register_entity;
 pub(crate) use fluid::register_fluid;
 #[cfg(test)]
 mod tests;
@@ -212,6 +214,22 @@ fn head_profile(profile: &HeadProfile) -> Result<ResolvableProfile, String> {
     ))
 }
 
+/// One stack showing an appearance: a patch with its model and skin over the vanilla item.
+pub(crate) fn appearance_stack(
+    registry: &Registry,
+    appearance_definition: &ItemAppearance,
+) -> Result<ItemStack, String> {
+    let (item, components) = appearance(registry, appearance_definition)?;
+    let mut patch = DataComponentPatch::new();
+    if let Some(model) = components.get(ITEM_MODEL) {
+        patch.set(ITEM_MODEL, model);
+    }
+    if let Some(profile) = components.get(PROFILE) {
+        patch.set(PROFILE, profile);
+    }
+    Ok(ItemStack::with_count_and_patch(item, 1, patch))
+}
+
 fn prepare_displays(
     registry: &Registry,
     displays: &[ItemDisplay],
@@ -219,17 +237,8 @@ fn prepare_displays(
     displays
         .iter()
         .map(|display| {
-            let (item, components) = appearance(registry, &display.appearance)?;
-            // Per-display appearance is a stack patch over the actual vanilla item.
-            let mut patch = DataComponentPatch::new();
-            if let Some(model) = components.get(ITEM_MODEL) {
-                patch.set(ITEM_MODEL, model);
-            }
-            if let Some(profile) = components.get(PROFILE) {
-                patch.set(PROFILE, profile);
-            }
             Ok(BlockItemDisplay {
-                item: ItemStack::with_count_and_patch(item, 1, patch),
+                item: appearance_stack(registry, &display.appearance)?,
                 translation: Vec3::from_array(display.translation),
                 scale: Vec3::from_array(display.scale),
                 rotation: Quat::from_array(display.rotation),

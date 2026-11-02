@@ -12,11 +12,11 @@ use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::{REGISTRY, RegistryEntry};
 use uuid::Uuid;
 
+use super::entities::mobs::extension::{ExtensionMob, init_mob_hooks};
 use super::generated_entities::register_entity_factories;
 use super::{
     EntityBaseLoad, EntityBaseSaveData, EntityFireFreezeState, SharedEntity, next_entity_id,
 };
-use super::entities::mobs::extension::{ExtensionMob, init_mob_hooks};
 use crate::world::World;
 
 /// Factory function type for creating entities.

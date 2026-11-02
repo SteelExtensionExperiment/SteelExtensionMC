@@ -9,6 +9,7 @@ mod callbacks;
 pub mod command;
 pub mod content;
 pub mod effects;
+pub mod entity_behavior;
 mod entry;
 pub mod events;
 pub mod fill;
@@ -72,6 +73,7 @@ pub fn bind(bootstrap: Bootstrap) -> Result<(), BindError> {
         .chain(fill::replace_api::imports())
         .chain(biomes::api::imports())
         .chain(fluid_behavior::api::imports())
+        .chain(entity_behavior::api::imports())
         .chain(content::api::imports())
         .copied()
         .collect();

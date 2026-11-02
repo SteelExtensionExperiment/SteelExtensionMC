@@ -6,8 +6,8 @@ pub mod api {
     use crate::{
         ApiResult, BlockState,
         content::{
-            BedDefinition, BiomeDefinition, BlockDefinition, BlockItemDefinition, FluidDefinition,
-            ItemDefinition, RegisteredFluid, SlabMaterial,
+            BedDefinition, BiomeDefinition, BlockDefinition, BlockItemDefinition, EntityDefinition,
+            FluidDefinition, ItemDefinition, RegisteredFluid, SlabMaterial,
         },
     };
     use stabby::{string::String as ApiString, vec::Vec as ApiVec};
@@ -46,6 +46,13 @@ pub mod api {
         /// Registers a block without a placing item or default loot table.
         pub fn register_block(&mut self, definition: BlockDefinition) -> ApiResult<BlockState> {
             content::register_block(self.host_mut().registry, definition)
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Registers a mob type that clients see as its vanilla carrier.
+        pub fn register_entity(&mut self, definition: EntityDefinition) -> ApiResult<()> {
+            content::register_entity(self.host_mut().registry, definition)
                 .map_err(ApiString::from)
                 .into()
         }

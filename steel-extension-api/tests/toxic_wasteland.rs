@@ -18,7 +18,8 @@ use steel_core::{
     bootstrap::init_globals,
     command::CommandRegistry,
     entity::{
-        InsideBlockEffectCollector, LivingEntity, SharedEntity, entities::PigEntity, next_entity_id,
+        ENTITIES, InsideBlockEffectCollector, LivingEntity, RemovalReason, SharedEntity,
+        entities::PigEntity, next_entity_id,
     },
     extension::{ExtensionHooks, RegisteredExtensions},
     world::World,
@@ -28,10 +29,11 @@ use steel_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _,
     blocks::block_state_ext::BlockStateExt as _,
     blocks::properties::BlockStateProperties,
-    client_content::{ClientFluid, client_block_state, client_fluid},
+    client_content::{ClientFluid, client_block_state, client_entity_type, client_fluid},
+    equipment::EquipmentSlot,
     vanilla_blocks, vanilla_dimension_types, vanilla_entities, vanilla_fluids, vanilla_mob_effects,
 };
-use steel_utils::{BlockPos, BlockStateId, ChunkPos, Identifier, types::UpdateFlags};
+use steel_utils::{BlockPos, BlockStateId, ChunkPos, Identifier, WorldAabb, types::UpdateFlags};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -67,7 +69,97 @@ fn toxic_wasteland_spreads_tints_hurts_and_persists() -> TestResult {
     check_random_tick_rates(&fixture.world, sludge);
     check_lava(&fixture.world, sludge);
     check_bucket(&fixture.world, sludge)?;
+    check_mobs(&fixture.world)?;
     check_persistence(&fixture, sludge)
+}
+
+/// The registered mobs: client projection, spawning, equipment, AI, death hooks.
+fn check_mobs(world: &Arc<World>) -> TestResult {
+    let key = |path| Identifier::new_static("toxic_wasteland", path);
+    for (path, carrier) in [
+        ("sludge_slime", &raw const vanilla_entities::SLIME),
+        ("small_sludge_slime", &raw const vanilla_entities::SLIME),
+        ("irradiated_ghoul", &raw const vanilla_entities::HUSK),
+    ] {
+        let entity_type = REGISTRY
+            .entity_types
+            .by_key(&key(path))
+            .ok_or("mob type missing")?;
+        assert!(
+            std::ptr::eq(client_entity_type(entity_type), carrier),
+            "{path}"
+        );
+        assert!(!REGISTRY.client_content.is_vanilla_entity_type(entity_type));
+    }
+
+    let spawn = |path: &'static str, x: f64| -> Result<SharedEntity, Box<dyn Error>> {
+        let entity_type = REGISTRY
+            .entity_types
+            .by_key(&key(path))
+            .ok_or("mob type missing")?;
+        let entity = ENTITIES
+            .create(
+                entity_type,
+                next_entity_id(),
+                DVec3::new(x, f64::from(FLOOR_Y + 1), 10.5),
+                Arc::downgrade(world),
+            )
+            .ok_or("no factory for the mob")?;
+        world.try_add_entity(Arc::clone(&entity))?;
+        Ok(entity)
+    };
+
+    let ghoul = spawn("irradiated_ghoul", 3.5)?;
+    let living = ghoul.as_living_entity().ok_or("the ghoul is not living")?;
+    assert!((living.get_max_health() - 30.0).abs() < f32::EPSILON);
+    let mut head = String::new();
+    living.with_equipment_slot(EquipmentSlot::Head, &mut |stack| {
+        head = stack.item().key.to_string();
+    });
+    assert_eq!(
+        head, "minecraft:player_head",
+        "the ghoul wears its radioactive face"
+    );
+    living.server_ai_step(&ghoul);
+
+    let slime = spawn("sludge_slime", 10.5)?;
+    slime
+        .as_living_entity()
+        .ok_or("the slime is not living")?
+        .server_ai_step(&slime);
+    let small_type = REGISTRY
+        .entity_types
+        .by_key(&key("small_sludge_slime"))
+        .ok_or("small slime type missing")?;
+    let count_small = || {
+        world
+            .get_entities_in_aabb_matching(
+                &WorldAabb::new(
+                    0.0,
+                    f64::from(FLOOR_Y - 2),
+                    0.0,
+                    16.0,
+                    f64::from(FLOOR_Y + 8),
+                    16.0,
+                ),
+                |entity| std::ptr::eq(entity.entity_type(), small_type),
+            )
+            .len()
+    };
+    assert_eq!(count_small(), 0);
+    slime.set_removed(RemovalReason::Killed);
+    assert_eq!(count_small(), 2, "a sludge slime splits in two when killed");
+    let puddle = world.get_block_state(BlockPos::new(10, FLOOR_Y + 1, 10));
+    assert_eq!(
+        REGISTRY
+            .blocks
+            .by_state_id(puddle)
+            .map(|block| block.key.clone()),
+        Some(SLUDGE),
+        "a killed sludge slime leaves sludge"
+    );
+    clear(world);
+    Ok(())
 }
 
 fn floor(world: &Arc<World>) {
@@ -417,6 +509,23 @@ fn check_persistence(fixture: &fixture::Fixture, sludge: &ClientFluid) -> TestRe
         Some(wasteland)
     );
 
+    let ghoul_type = REGISTRY
+        .entity_types
+        .by_key(&Identifier::new_static(
+            "toxic_wasteland",
+            "irradiated_ghoul",
+        ))
+        .ok_or("ghoul type missing")?;
+    let ghoul = ENTITIES
+        .create(
+            ghoul_type,
+            next_entity_id(),
+            DVec3::new(12.5, f64::from(FLOOR_Y + 1), 3.5),
+            Arc::downgrade(world),
+        )
+        .ok_or("no factory for the ghoul")?;
+    world.try_add_entity(ghoul)?;
+
     fixture.runtime.block_on(world.save_all_chunks())?;
     let loaded = fixture
         .runtime
@@ -438,5 +547,12 @@ fn check_persistence(fixture: &fixture::Fixture, sludge: &ClientFluid) -> TestRe
         .biomes
         .get(0, 0, 0);
     assert_eq!(usize::from(biome), wasteland.id());
+    assert!(
+        loaded
+            .pending_entities
+            .iter()
+            .any(|entity| std::ptr::eq(entity.entity_type(), ghoul_type)),
+        "the ghoul is saved and reloaded as its own type"
+    );
     Ok(())
 }

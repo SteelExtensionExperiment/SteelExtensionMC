@@ -24,8 +24,8 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 
 use crate::entity::ai::goal::{
-    FloatGoal, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
-    Goal, GoalControls, RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
+    FloatGoal, Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
+    NearestAttackableTargetGoal, RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::{
@@ -89,7 +89,11 @@ impl MobHookRegistry {
             .by_key(key)
             .filter(|entity_type| REGISTRY.client_content.entity(entity_type).is_some())
             .ok_or_else(|| format!("{key} is not a registered extension mob"))?;
-        if self.hooks.iter().any(|(existing, _)| std::ptr::eq(*existing, entity_type)) {
+        if self
+            .hooks
+            .iter()
+            .any(|(existing, _)| std::ptr::eq(*existing, entity_type))
+        {
             return Err(format!("{key} already has mob hooks"));
         }
         self.hooks.push((entity_type, hooks));
@@ -108,7 +112,8 @@ impl MobHookRegistry {
 pub(crate) fn init_mob_hooks() {
     MOB_HOOKS.get_or_init(|| {
         let mut registry = MobHookRegistry::default();
-        if let Some(hooks) = REGISTRATION_HOOKS.lock().take() {
+        let pending = REGISTRATION_HOOKS.lock().take();
+        if let Some(hooks) = pending {
             for hook in hooks {
                 hook(&mut registry);
             }
@@ -118,7 +123,9 @@ pub(crate) fn init_mob_hooks() {
 }
 
 fn hooks_for(entity_type: EntityTypeRef) -> Option<&'static Arc<dyn MobHooks>> {
-    MOB_HOOKS.get().and_then(|registry| registry.get(entity_type))
+    MOB_HOOKS
+        .get()
+        .and_then(|registry| registry.get(entity_type))
 }
 
 /// The carrier's synced data, so clients decode it as that vanilla type.
@@ -266,7 +273,10 @@ impl ExtensionMob {
     #[must_use]
     pub fn new(entity_type: EntityTypeRef, id: i32, position: DVec3, world: Weak<World>) -> Self {
         let dimensions = Self::base_dimensions(entity_type);
-        Self::new_with_base(EntityBase::new(id, position, dimensions, world), entity_type)
+        Self::new_with_base(
+            EntityBase::new(id, position, dimensions, world),
+            entity_type,
+        )
     }
 
     /// Loads a saved instance of a registered mob type.
@@ -359,8 +369,14 @@ impl ExtensionMob {
         goals.add_goal(8, LookAtPlayerGoal::new(8.0));
         goals.add_goal(8, RandomLookAroundGoal::new());
         let mut targets = mob_base.target_selector().lock();
-        targets.add_goal(1, HurtByTargetGoal::new().set_alert_others(std::iter::empty()));
-        targets.add_goal(2, NearestAttackableTargetGoal::new_for_players(true, |_, _| true));
+        targets.add_goal(
+            1,
+            HurtByTargetGoal::new().set_alert_others(std::iter::empty()),
+        );
+        targets.add_goal(
+            2,
+            NearestAttackableTargetGoal::new_for_players(true, |_, _| true),
+        );
     }
 
     const fn cube_size(&self) -> Option<i32> {
@@ -393,7 +409,11 @@ impl ExtensionMob {
         self.set_y_body_rot(yaw);
         let Some(speed_modifier) = control.wanted_speed else {
             let input = self.travel_input();
-            self.set_travel_input(LivingTravelInput::new(input.sideways(), input.vertical(), 0.0));
+            self.set_travel_input(LivingTravelInput::new(
+                input.sideways(),
+                input.vertical(),
+                0.0,
+            ));
             return;
         };
         let speed = (speed_modifier * self.movement_speed()) as f32;
@@ -606,8 +626,7 @@ impl LivingEntity for ExtensionMob {
     }
 
     fn sound_volume(&self) -> f32 {
-        self.cube_size()
-            .map_or(1.0, |size| 0.4 * size as f32)
+        self.cube_size().map_or(1.0, |size| 0.4 * size as f32)
     }
 
     fn hurt_sound(&self, _source: &DamageSource) -> Option<SoundEventRef> {

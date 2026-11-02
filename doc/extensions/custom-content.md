@@ -381,3 +381,52 @@ effects:
 Without a tinting fluid, chunk and registry data are byte-identical to vanilla
 Steel. The [toxic-wasteland example](../../extension-example/toxic-wasteland/README.md)
 uses fluids, biomes, the tint, and a generator together.
+
+## Custom mobs
+
+`ContentRegistry::register_entity(EntityDefinition)` registers a mob type that
+clients see as a vanilla **carrier**: `minecraft:slime`, `minecraft:magma_cube`,
+`minecraft:zombie`, or `minecraft:husk`. The spawn packet names the carrier, and the
+synced data uses the carrier's layout. Saves and gameplay keep the registered key. Registered types are left out of the entity tags and statistics
+sent to clients.
+
+```rust
+use steel_extension_api::content::{EntityDefinition, ItemAppearance};
+
+let ghoul = EntityDefinition::melee("demo:ghoul", "minecraft:husk", "Ghoul")
+    .attribute("minecraft:max_health", 30.0)
+    .attribute("minecraft:attack_damage", 5.0)
+    .equip("head", ItemAppearance { /* a player head with a skin */ });
+registry.register_entity(ghoul);
+```
+
+The host runs a vanilla behavior chosen by `style`:
+
+- **`MobStyle::Cube`** (slime or magma cube carrier, `cube_size` from 1 to 8)
+  follows vanilla slimes. It hops toward its target, or in random directions; it
+  floats in liquids, and hurts the players it touches when larger than size 1. Its
+  dimensions and sounds scale with its size.
+- **`MobStyle::Melee`** (zombie or husk carrier) walks, targets players and whatever
+  hurts it, and attacks in melee like a zombie.
+
+`attributes` replace the carrier's vanilla attribute base values. `equipment`
+puts items in the head, chest, legs, feet, or hand slots; they are visible and
+never dropped. A player head with a skin on a husk makes a mob that looks
+nothing like a husk. `name` appears in death messages, and above the mob when
+`name_visible` is set.
+
+Hooks are attached during pre-init with `Hooks::register_entity_behaviors`. Call
+`EntityBehaviors::set_entity_behavior(key, behavior)` once per type with an
+`entity_behavior::EntityBehavior`:
+
+| Hook | Called when |
+| --- | --- |
+| `tick(world, mob)` | At the end of each of the mob's AI ticks. |
+| `attacked(world, mob, target)` | The mob hurt `target` with a melee or contact attack. |
+| `died(world, mob)` | The mob was killed, while it is still in the world, as vanilla slimes split. |
+
+`World::spawn_entity(key, position)` spawns any summonable type, vanilla or
+registered, in a loaded chunk and returns its UUID.
+`World::count_entities(key, center, radius)` counts the live ones nearby. Steel
+has no natural spawner yet, so extensions spawn their mobs themselves; the
+toxic-wasteland example spawns them around players on a server tick.

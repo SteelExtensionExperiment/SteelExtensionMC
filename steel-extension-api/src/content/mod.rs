@@ -3,8 +3,10 @@
 mod bindings;
 mod biome;
 mod definition;
+mod entity;
 mod fluid;
 pub use biome::{BiomeDefinition, BiomeParticle};
+pub use entity::{EntityDefinition, MobAttribute, MobEquipment, MobStyle};
 mod shapes;
 pub use bindings::api;
 pub use bindings::api::ContentRegistry;

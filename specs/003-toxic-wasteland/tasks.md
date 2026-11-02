@@ -206,7 +206,28 @@ reaction.
   New config keys: `world.tree_chance` and `world.uranium_chance`.
 - [x] T048 [US5] Add unit tests for chunk containment, trees on dry ground, exposed uranium, barrels on lake rims, determinism, and at most 16 display blocks per chunk. The native test checks both blocks' carrier, model, and self-drop.
 
-Custom entities were considered and deferred. The extension API has no entity type registration yet: a mob shown to vanilla clients as a vanilla mob, with its own saved identity, spawning, and extension-defined AI goals, is a platform foundation the size of the custom fluids and should be its own iteration.
+## Phase 11: Bonus - custom mobs (requested after Phase 10)
+
+- [x] T049 Add registered mob types to `steel-registry/src/client_content/entity.rs`:
+  - each is carried by a vanilla slime, magma cube, zombie or husk, with a style (`Cube { size }` or `Melee`), attribute overrides, a name, and visible equipment
+  - the carrier type is projected in spawn packets (`tracker`)
+  - custom types are filtered from entity tags and stats
+- [x] T050 Add the core `ExtensionMob` in `steel-core/src/entity/entities/mobs/extension.rs`:
+  - the carrier's synced data, wrapped in one enum
+  - vanilla slime movement (`SlimeMoveControl`) and its four goals, plus contact damage, for cube mobs
+  - zombie-like melee goals for humanoid mobs
+  - `MobHooks` (`tick`, `attacked`, `died`, the last one from `set_removed(Killed)` like vanilla `Slime.remove`)
+  - factories installed per registered type
+
+  `Mob::tick_vanilla_move_control` and `Mob::vanilla_do_hurt_target` are split out of the overridable defaults so overrides can call them.
+- [x] T051 Add the API: `ContentRegistry::register_entity` (`EntityDefinition`), `Hooks::register_entity_behaviors` with the stabby `EntityBehavior` trait, `World::spawn_entity`, and `World::count_entities`.
+- [x] T052 Add the extension mobs in `extension-example/toxic-wasteland/src/mobs.rs`:
+  - Sludge Slime: poisons on contact; on death, leaves a sludge puddle and splits into two Small Sludge Slimes
+  - Irradiated Ghoul: a husk carrier with the "Glowing One" head (minecraft-heads `9416e397`), whose blows poison and give nausea
+  - spawning around wasteland players on a server tick, with a `[mobs]` config section
+- [x] T053 Extend the native test: carriers, spawning, the ghoul's equipment, an AI tick, the split and puddle on death, and the ghoul saved and reloaded as its own type. Every API suite and the core suite pass.
+
+Not covered: the mobs' movement and combat with a real client in game, and natural spawning, which Steel does not have yet.
 
 ## Dependencies & execution order
 

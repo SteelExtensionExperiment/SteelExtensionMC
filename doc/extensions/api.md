@@ -118,6 +118,7 @@ A dependency cycle or a lifecycle failure stops startup.
 | --- | --- | --- |
 | `register_content_registration` | `extern "C" fn(content::ContentRegistry<'_>) -> ApiResult<()>` | Before the item/block data registries freeze. |
 | `register_block_registration` | `extern "C" fn(Registry<'_>) -> ApiResult<()>` | During block behavior registry initialization. |
+| `register_entity_behaviors` | `extern "C" fn(entity_behavior::api::EntityBehaviors<'_>) -> ApiResult<()>` | While entity factories initialize. |
 | `register_fluid_behaviors` | `extern "C" fn(fluid_behavior::api::FluidBehaviors<'_>) -> ApiResult<()>` | During fluid behavior initialization, after block behaviors. |
 | `register_generator_registration` | `extern "C" fn(GeneratorRegistry<'_>) -> ApiResult<()>` | During generator registry initialization. |
 | `register_commands` | `extern "C" fn(Commands<'_>) -> ApiResult<()>` | Before the command dispatcher freezes. |
@@ -186,7 +187,10 @@ adds a synced biome. Gameplay hooks for a fluid are attached with
 `Hooks::register_fluid_behaviors`. At runtime, `World::biome_at`,
 `World::set_biomes`, `World::replace_blocks`, `World::schedule_fluid_tick`, and
 `World::game_time` read and change worlds. Borrowed entities in hooks can be
-damaged and given effects. See [Custom fluids](custom-content.md#custom-fluids),
+damaged and given effects. `register_entity` adds mob types shown as vanilla
+slimes, magma cubes, zombies, or husks, with host-run vanilla AI and hooks;
+`World::spawn_entity` and `World::count_entities` place and count them. See
+[Custom mobs](custom-content.md#custom-mobs), [Custom fluids](custom-content.md#custom-fluids),
 [Custom biomes](custom-content.md#custom-biomes), and
 [Tint projection](custom-content.md#tint-projection); the
 [toxic-wasteland example](../../extension-example/toxic-wasteland/README.md)
