@@ -1,11 +1,17 @@
 //! Startup registration of independent server items and blocks for vanilla clients.
 
 mod bindings;
+mod biome;
 mod definition;
+mod entity;
+mod fluid;
+pub use biome::{BiomeDefinition, BiomeParticle};
+pub use entity::{EntityDefinition, MobAttribute, MobEquipment, MobStyle};
 mod shapes;
 pub use bindings::api;
 pub use bindings::api::ContentRegistry;
 pub use definition::{BlockDefinition, BlockProperties, HorizontalPlacement, SlabMaterial};
+pub use fluid::{FluidDefinition, FluidTint, RegisteredFluid};
 pub use shapes::{BlockShapes, ShapeBox, VoxelShape};
 
 use stabby::{option::Option as ApiOption, string::String as ApiString, vec::Vec as ApiVec};

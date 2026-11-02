@@ -13,6 +13,7 @@ use steel_protocol::packets::game::{
     CSetEntityMotion, CSetEquipment, CSetPassengers, CUpdateAttributes, EquipmentSlotItem,
     to_angle_byte,
 };
+use steel_registry::client_content::client_entity_type;
 use steel_registry::entity_data::DataValue;
 use steel_registry::{RegistryEntry, vanilla_entities};
 use steel_utils::ChunkPos;
@@ -870,7 +871,8 @@ impl EntitySpawnPairing {
         let vel = entity.velocity();
         let (yaw, pitch) = entity.rotation();
         let head_yaw = entity.head_yaw();
-        let entity_type_id = entity.entity_type().id() as i32;
+        // Registered mob types are sent as their vanilla carrier.
+        let entity_type_id = client_entity_type(entity.entity_type()).id() as i32;
 
         // Convert rotation from degrees to protocol byte format (256th of a full rotation)
         // Uses to_angle_byte which matches vanilla's Mth.packDegrees
