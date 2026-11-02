@@ -289,6 +289,8 @@ pub struct PlayerInteractEntityEvent {
     pub player: Arc<Player>,
     /// Clicked entity.
     pub target: super::EntityInfo,
+    /// World-space hit point from the packet's entity-relative location.
+    pub hit_position: DVec3,
     /// Hand used.
     pub hand: steel_utils::types::InteractionHand,
     /// Whether the interaction is ignored.

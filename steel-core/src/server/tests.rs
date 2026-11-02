@@ -274,7 +274,8 @@ fn saved_location_planning_honors_explicit_world_selection() {
         saved_player.base().set_position_local(saved_position);
         saved_player.set_velocity(saved_velocity);
         saved_player.set_health(7.0);
-        let mut saved_data = PersistentPlayerData::from_player(&saved_player);
+        let mut saved_data = PersistentPlayerData::from_player(&saved_player)
+            .expect("player snapshot should succeed");
         let saved_root_uuid = [3; 16];
         saved_data.root_vehicle = Some(PersistentRootVehicle {
             attach: [4; 16],
@@ -338,7 +339,8 @@ fn saved_location_planning_honors_explicit_world_selection() {
             mismatch_player.domain_residence_token(),
             &restores,
         ));
-        let mismatch_snapshot = PersistentPlayerData::from_player(&mismatch_player);
+        let mismatch_snapshot = PersistentPlayerData::from_player(&mismatch_player)
+            .expect("player snapshot should succeed");
         assert!(mismatch_snapshot.root_vehicle.is_none());
 
         let matching_plan = server
@@ -486,7 +488,8 @@ fn domain_switch_job_progresses_across_chunk_scheduling_boundaries() {
         let source_residence = player.domain_residence_token();
 
         let target_position = DVec3::new(8.5, 70.0, 8.5);
-        let mut target_data = PersistentPlayerData::from_player(&player);
+        let mut target_data =
+            PersistentPlayerData::from_player(&player).expect("player snapshot should succeed");
         target_data.world = target_world.key.to_string();
         target_data.pos = target_position.to_array();
         let saved = server
@@ -883,7 +886,9 @@ fn domain_detach_snapshots_pending_restores_before_stale_jobs_finish() {
         server.jobs.spawn(root_job);
         server.jobs.spawn(pearl_job);
 
-        let detached = world.detach_player_for_domain_switch(&player);
+        let detached = world
+            .detach_player_for_domain_switch(&player)
+            .expect("domain snapshot should succeed");
         let Some((snapshot, target_token)) = detached else {
             panic!("live player should detach");
         };
@@ -949,7 +954,9 @@ fn domain_detach_invalidates_an_encoded_source_chunk_batch() {
         assert!(!encoded.is_empty());
         sent_packets.lock().clear();
 
-        let detached = world.detach_player_for_domain_switch(&player);
+        let detached = world
+            .detach_player_for_domain_switch(&player)
+            .expect("domain snapshot should succeed");
         assert!(detached.is_some());
         assert_eq!(*player.chunk_send_epoch.lock(), old_epoch.wrapping_add(1));
         assert!(player.last_tracking_view.lock().is_none());
@@ -1121,7 +1128,8 @@ fn failed_target_admission_preserves_only_valid_target_restores() {
         let target_root_uuid = [8; 16];
         let target_pearl_uuid = [9; 16];
         let foreign_pearl_uuid = [10; 16];
-        let mut target_data = PersistentPlayerData::from_player(&player);
+        let mut target_data =
+            PersistentPlayerData::from_player(&player).expect("player snapshot should succeed");
         target_data.world = target_world.key.to_string();
         target_data.pos = [8.5, 70.0, 8.5];
         target_data.root_vehicle = Some(PersistentRootVehicle {
@@ -1327,7 +1335,8 @@ fn portal_job_validity_rechecks_vanilla_portal_eligibility() {
 }
 
 fn apply_non_default_domain_data(player: &Player) {
-    let mut source_data = PersistentPlayerData::from_player(player);
+    let mut source_data =
+        PersistentPlayerData::from_player(player).expect("player snapshot should succeed");
     source_data.remaining_fire_ticks = 40;
     source_data.ticks_frozen = 20;
     source_data.is_in_powder_snow = true;
@@ -1358,7 +1367,8 @@ fn apply_non_default_domain_data(player: &Player) {
 }
 
 fn assert_default_domain_data(player: &Player) {
-    let target_data = PersistentPlayerData::from_player(player);
+    let target_data =
+        PersistentPlayerData::from_player(player).expect("player snapshot should succeed");
     assert_eq!(target_data.remaining_fire_ticks, 0);
     assert_eq!(target_data.ticks_frozen, 0);
     assert!(!target_data.is_in_powder_snow);
@@ -1778,7 +1788,10 @@ fn command_gameplay_availability_tracks_exact_domain_residence() {
         }
 
         assert!(player.mark_domain_switch_detached(pending_token));
-        let Some((_data, _residence)) = world.detach_player_for_domain_switch(&player) else {
+        let Some((_data, _residence)) = world
+            .detach_player_for_domain_switch(&player)
+            .expect("domain snapshot should succeed")
+        else {
             panic!("test player should detach from its source world");
         };
         let detached_owner =
@@ -2671,7 +2684,8 @@ fn initial_admission_installs_restores_before_scheduling_jobs() {
 
         let root_uuid = [13; 16];
         let pearl_uuid = [14; 16];
-        let mut data = PersistentPlayerData::from_player(&joining);
+        let mut data =
+            PersistentPlayerData::from_player(&joining).expect("player snapshot should succeed");
         data.world = world.key.to_string();
         data.root_vehicle = Some(PersistentRootVehicle {
             attach: [15; 16],

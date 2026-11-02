@@ -5,6 +5,8 @@
 )]
 
 pub mod control;
+pub mod controller;
+pub mod flight;
 pub mod goal;
 pub mod navigation;
 pub mod node;

@@ -26,6 +26,8 @@ pub struct PlayerSession {
     pub(super) drop_spam_throttler: SyncMutex<TickThrottler>,
     /// Sidebar, boss bars and tab list override; the client keeps them across respawns.
     pub(super) hud: SyncMutex<PlayerHud>,
+    /// Keeps reconciliation and packet enqueueing in the same order across HUD producers.
+    pub(super) hud_dispatch: SyncMutex<()>,
 }
 
 enum CurrentPlayerSlot {
@@ -63,6 +65,7 @@ impl PlayerSession {
                 DROP_SPAM_THROTTLER_THRESHOLD,
             )),
             hud: SyncMutex::new(PlayerHud::default()),
+            hud_dispatch: SyncMutex::new(()),
         }
     }
 

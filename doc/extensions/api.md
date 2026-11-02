@@ -13,7 +13,8 @@ use steel_extension_api::{ApiResult, BlockPos, BlockState, Hooks, Registry, Worl
 use steel_extension_api::stabby;
 ```
 
-Other public modules are `content`, `hooks`, `runtime`, `block_behavior`,
+Other public modules include `data`, `hud`, `projectiles`, `world_effects`,
+`terrain`, `entities`, `content`, `hooks`, `runtime`, `block_behavior`,
 `block_behavior::types`, `block_behavior::capabilities`, and
 `block_behavior::block_entity`. Methods on the opaque handles are generated from
 the binding declarations. Generate full Rust documentation, including complete
@@ -525,7 +526,9 @@ layer built on the same checked bindings. The
 | `players` | Lookup, teleport, health, food, flight, game mode, messages, titles, permissions. |
 | `items` | `ItemSpec` stacks with names, lore, enchantments and private data; inventory slots. |
 | `menus` | Read-only chest GUIs with click handlers. |
-| `hud` | Per-player sidebar, boss bars and tab list. |
+| `hud` | Owner-bound sidebar/tab sections, independent boss bars, data templates and server-owner layouts. |
+| `data` | Shared typed custom data on players and entities, with atomic numeric changes ([guide](custom-data.md)). |
+| `projectiles` | Custom item projectiles using native movement and collision, with synchronous impact callbacks. |
 | `effects` | Particles, sounds, potion effects, experience and speeds. |
 | `worlds` | `Server::with_world`, time, weather, item drops, entities, plugin messages. |
 | `fill` | Section-batched region fills (about ten million blocks per second). |

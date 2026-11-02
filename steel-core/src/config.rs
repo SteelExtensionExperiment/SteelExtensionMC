@@ -20,6 +20,7 @@ use text_components::TextComponent;
 use toml::map::Map;
 
 use crate::chunk_saver::registry::WorldStorageRegistry;
+use crate::player::hud::HudPolicy;
 use crate::worldgen::registry::{ValidatedWorldGeneratorConfig, WorldGeneratorRegistry};
 
 /// Error returned when online mode is configured without its authentication handshake.
@@ -54,6 +55,8 @@ pub const fn validate_login_security(
 /// Stored on `Server` and accessed by game logic at runtime.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
+    /// Owner-controlled composition of extension HUD contributions.
+    pub hud: HudPolicy,
     /// The maximum number of players that can be on the server at once.
     pub max_players: u32,
     /// The view distance of the server.
@@ -103,6 +106,7 @@ impl Default for RuntimeConfig {
     /// endpoints and server links unset.
     fn default() -> Self {
         Self {
+            hud: HudPolicy::default(),
             max_players: 20,
             view_distance: 10,
             simulation_distance: 10,

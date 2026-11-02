@@ -1,5 +1,6 @@
 //! Main entry point for the Steel Minecraft server.
 #![feature(thread_id_value)]
+#![recursion_limit = "256"]
 
 use std::backtrace::{Backtrace, BacktraceStatus};
 use std::panic::AssertUnwindSafe;

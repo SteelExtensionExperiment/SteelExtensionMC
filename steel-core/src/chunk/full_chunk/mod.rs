@@ -1,4 +1,5 @@
 //! Full-chunk behavior over the common owning [`Chunk`].
+use crate::chunk::block_attachment::BlockAttachment;
 use std::{
     fmt,
     io::Cursor,
@@ -1550,7 +1551,7 @@ impl FullChunkRef<'_> {
         state: BlockStateId,
         flags: UpdateFlags,
     ) -> Option<BlockStateId> {
-        match self.set_block_state_inner(pos, None, state, flags)? {
+        match self.set_block_state_inner(pos, None, state, flags, None)? {
             FullChunkBlockSetResult::Changed(old_state) => Some(old_state),
             FullChunkBlockSetResult::Unchanged | FullChunkBlockSetResult::Stale(_) => None,
         }
@@ -1563,7 +1564,51 @@ impl FullChunkRef<'_> {
         new_state: BlockStateId,
         flags: UpdateFlags,
     ) -> Option<FullChunkBlockSetResult> {
-        self.set_block_state_inner(pos, Some(expected_state), new_state, flags)
+        self.set_block_state_inner(pos, Some(expected_state), new_state, flags, None)
+    }
+
+    /// Snapshots owner data without keeping the attachment collection locked.
+    #[must_use]
+    pub fn block_attachments(&self) -> Vec<(BlockPos, Arc<BlockAttachment>)> {
+        self.chunk
+            .block_attachments
+            .lock()
+            .iter()
+            .map(|(pos, attachment)| (*pos, Arc::clone(attachment)))
+            .collect()
+    }
+
+    /// Looks up owner data for one block without retaining the collection lock.
+    #[must_use]
+    pub fn block_attachment(&self, pos: BlockPos) -> Option<Arc<BlockAttachment>> {
+        self.chunk
+            .block_attachments
+            .lock()
+            .get(&pos)
+            .map(Arc::clone)
+    }
+
+    /// Removes exactly the observed claim, preserving any later replacement.
+    pub fn remove_block_attachment(&self, pos: BlockPos, expected: &Arc<BlockAttachment>) {
+        let mut attachments = self.chunk.block_attachments.lock();
+        if attachments
+            .get(&pos)
+            .is_some_and(|current| Arc::ptr_eq(current, expected))
+        {
+            attachments.remove(&pos);
+            self.chunk.mark_dirty();
+        }
+    }
+
+    pub(crate) fn set_block_with_attachment(
+        &self,
+        pos: BlockPos,
+        expected: BlockStateId,
+        placed: BlockStateId,
+        attachment: Arc<BlockAttachment>,
+        flags: UpdateFlags,
+    ) -> Option<FullChunkBlockSetResult> {
+        self.set_block_state_inner(pos, Some(expected), placed, flags, Some(attachment))
     }
 
     #[expect(
@@ -1576,6 +1621,7 @@ impl FullChunkRef<'_> {
         expected_state: Option<BlockStateId>,
         state: BlockStateId,
         flags: UpdateFlags,
+        mut attachment: Option<Arc<BlockAttachment>>,
     ) -> Option<FullChunkBlockSetResult> {
         let y = pos.0.y;
 
@@ -1630,8 +1676,18 @@ impl FullChunkRef<'_> {
                 false
             };
 
+            let mut block_attachments = self.chunk.block_attachments.lock();
+            if attachment.is_some() && block_attachments.contains_key(&pos) {
+                return Some(FullChunkBlockSetResult::Stale(observed_state));
+            }
             let was_empty = section_guard.is_empty();
             let old_state = section_guard.set_block_state(local_x, local_y, local_z, state);
+            if let Some(record) = attachment.take() {
+                block_attachments.insert(pos, record);
+            } else {
+                block_attachments.remove(&pos);
+            }
+            drop(block_attachments);
             debug_assert_eq!(old_state, observed_state);
             let detached_block_entity = detach_block_entity.then(|| {
                 self.chunk

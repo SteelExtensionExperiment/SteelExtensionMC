@@ -2,7 +2,9 @@
 
 pub(crate) mod commands;
 pub(crate) mod content;
+pub(crate) mod data;
 pub(crate) mod effects;
+pub(crate) mod entities;
 pub(crate) mod entity;
 pub(crate) mod events;
 pub(crate) mod fill;
@@ -14,12 +16,20 @@ mod lifecycle;
 pub(crate) mod menus;
 mod package;
 pub(crate) mod players;
+pub(crate) mod projectiles;
 pub(crate) mod runtime;
 pub(crate) mod services;
+pub(crate) mod terrain;
+pub(crate) mod world_effects;
 pub(crate) mod worlds;
 use crate::content::api as content_api;
+use crate::data::api as data_api;
+use crate::entities::api as entities_api;
 use crate::hooks::api as hooks_api;
+use crate::projectiles::api as projectiles_api;
 use crate::runtime::api as runtime_api;
+use crate::terrain::api as terrain_api;
+use crate::world_effects::api as world_effects_api;
 use lifecycle::{DependencyInfo, resolve, split_dependencies};
 pub(crate) use lifecycle::{ExtensionContextData, ExtensionState};
 pub use lifecycle::{InitializedExtensions, LoadedExtension, initialize_all};
@@ -135,6 +145,12 @@ pub fn bootstrap(mut hook: RegistrationHook<'_>) -> RegistrationStatus {
         crate::items::api::register_exports,
         crate::effects::api::register_exports,
         crate::hud::api::register_exports,
+        data_api::register_exports,
+        projectiles_api::register_exports,
+        world_effects_api::register_exports,
+        terrain_api::register_exports,
+        entities_api::register_exports,
+        crate::entities::control::api::register_exports,
         crate::worlds::api::register_exports,
         crate::menus::api::register_exports,
         crate::fill::api::register_exports,
@@ -366,6 +382,7 @@ pub unsafe fn load_all(
     hooks: &mut ExtensionHooks,
 ) -> Result<LoadReport, String> {
     menus::install(hooks);
+    terrain::install(hooks);
     let mut skipped = Vec::new();
     let mut opened = Vec::with_capacity(sources.len());
     for source in sources {
@@ -589,3 +606,10 @@ pub(crate) fn is_air(state: BlockState) -> bool {
     use steel_registry::blocks::block_state_ext::BlockStateExt as _;
     valid_state(state).is_none_or(|_| BlockStateId(state.id).is_air())
 }
+
+#[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
+#[path = "../../tests/creatures_and_magic/mod.rs"]
+mod creatures_and_magic;

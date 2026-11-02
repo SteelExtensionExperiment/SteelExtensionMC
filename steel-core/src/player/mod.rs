@@ -1,6 +1,7 @@
 //! This module contains all things player-related.
 mod abilities;
 pub mod advancement;
+pub mod attachments;
 pub mod bot;
 pub mod chat;
 pub mod chunk_sender;
@@ -32,6 +33,7 @@ pub mod stats_counter;
 mod tick_state;
 mod title;
 
+use self::attachments::PlayerAttachments;
 use crate::player::player_inventory::Prediction;
 pub use abilities::{Abilities, DEFAULT_FLYING_SPEED};
 use chat::ChatState;
@@ -263,6 +265,8 @@ pub struct Player {
 
     /// The Player's Experience
     pub experience: SyncMutex<Experience>,
+    /// Runtime services participating in saves and player lifecycle changes.
+    pub attachments: PlayerAttachments,
 
     /// Assigned groups, direct overrides, and the effective permission set.
     permissions: SyncMutex<PlayerPermissionState>,
@@ -633,6 +637,7 @@ impl Player {
             food_data: SyncMutex::new(FoodData::new()),
             health_sync: SyncMutex::new(HealthSyncState::new()),
             experience: SyncMutex::new(Experience::default()),
+            attachments: PlayerAttachments::default(),
             permissions: SyncMutex::new(PlayerPermissionState::default()),
             seen_credits: SyncMutex::new(false),
             won_game: SyncMutex::new(false),
@@ -1864,6 +1869,13 @@ impl LivingEntity for Player {
 
     fn tick_living_entity(&self, entity: &SharedEntity) {
         self.advance_tick();
+        // Domain restores and dependency writes are reflected without producer coordination.
+        if let Err(error) = self.refresh_hud() {
+            log::trace!(
+                "player {} HUD retains its last valid presentation: {error}",
+                self.id()
+            );
+        }
         self.tick_bot_controls();
         self.tick_item_cooldowns();
         self.tick_attack_strength();
@@ -1983,8 +1995,7 @@ impl LivingEntity for Player {
     }
 
     fn set_health(&self, health: f32) {
-        let max_health = self.get_max_health();
-        let clamped = health.clamp(0.0, max_health);
+        let clamped = self.clamp_health(health);
         self.entity_data
             .lock()
             .living_entity_mut()

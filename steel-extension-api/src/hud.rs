@@ -1,12 +1,36 @@
-//! Per-player HUD: private sidebar, boss bars and tab list header/footer.
-//!
-//! Each player has one sidebar owned by whichever extension last set it; lines are text
-//! (JSON components or plain), top line first, at most 15. Updates only send changed lines,
-//! so calling [`Server::set_sidebar`](crate::Server::set_sidebar) every tick is cheap.
-//! Boss bars are identified by a extension-chosen [`Uuid`](crate::players::Uuid). A tab list
-//! override replaces the server's TPS header/footer for that player until cleared.
+//! Owner-bound HUD contributions and player-data templates.
+//! Independent sidebars and tab sections combine; boss bars have source-local identities.
+//! The owner configures layout under `server.hud` and resolves overflow explicitly.
 
-use stabby::string::String as ApiString;
+use crate::{PlayerId, Server, players::Uuid};
+use stabby::{str::Str, string::String as ApiString, vec::Vec as ApiVec};
+use std::sync::OnceLock;
+
+/// A source registered under the calling extension's identity.
+#[stabby::stabby]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Source {
+    pub(crate) id: u64,
+}
+
+static DEFAULT_SOURCE: OnceLock<Source> = OnceLock::new();
+
+#[doc(hidden)]
+pub fn bind_default_source(hooks: &mut crate::Hooks<'_>) -> Result<(), ApiString> {
+    let source = hooks.hud_source("default".into()).match_owned(Ok, Err)?;
+    if *DEFAULT_SOURCE.get_or_init(|| source) == source {
+        Ok(())
+    } else {
+        Err("default HUD source identity changed".into())
+    }
+}
+
+fn default_source() -> Result<Source, ApiString> {
+    DEFAULT_SOURCE
+        .get()
+        .copied()
+        .ok_or_else(|| "HUD is unavailable before extension pre-init".into())
+}
 
 /// Vanilla boss bar color.
 #[stabby::stabby]
@@ -89,67 +113,211 @@ impl BossBar {
     }
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "Borrowed ABI handles follow the shared receiver convention of the Server API"
+)]
 #[stabby::host_api]
 /// HUD bindings on `Server`.
 pub mod api {
-    use super::BossBar;
-    use crate::{ApiResult, PlayerId, Server, players::Uuid};
+    use super::{BossBar, Source};
+    use crate::{ApiResult, ExtensionContext, Hooks, PlayerId, Server, players::Uuid};
     use stabby::{str::Str, string::String as ApiString, vec::Vec as ApiVec};
 
     #[cfg(feature = "host")]
     use crate::host::hud as host;
 
-    impl<'a> Server<'a> {
-        /// Shows or updates a player's sidebar (top line first, at most 15 lines).
-        pub fn set_sidebar(
-            &self,
-            player: PlayerId,
-            title: Str<'_>,
-            lines: ApiVec<ApiString>,
-        ) -> ApiResult<()> {
-            host::set_sidebar(self.host(), player, title.as_str(), &lines)
+    impl<'a> Hooks<'a> {
+        /// Registers a named source during pre-init.
+        pub fn hud_source(&mut self, key: Str<'_>) -> ApiResult<Source> {
+            host::source(self.host().extension.name, key.as_str())
+                .map_err(ApiString::from)
+                .into()
+        }
+    }
+
+    impl<'a> ExtensionContext<'a> {
+        /// Registers a named source under this extension's identity.
+        pub fn hud_source(&self, key: Str<'_>) -> ApiResult<Source> {
+            host::source(self.host().state.name, key.as_str())
+                .map_err(ApiString::from)
+                .into()
+        }
+    }
+
+    impl Source {
+        /// Registers a friendly alias for a typed player-data path.
+        pub fn bind(&self, alias: Str<'_>, path: Str<'_>) -> ApiResult<()> {
+            host::bind(*self, alias.as_str(), path.as_str())
                 .map_err(ApiString::from)
                 .into()
         }
 
-        /// Removes a player's sidebar.
-        pub fn clear_sidebar(&self, player: PlayerId) -> ApiResult<()> {
-            host::clear_sidebar(self.host(), player)
+        /// Publishes a sidebar section. Templates support `${alias}` and `${bar(alias, 20)}`.
+        /// An empty title contributes lines without adding a header label or separator.
+        pub fn set_sidebar(
+            &self,
+            server: &Server<'_>,
+            player: PlayerId,
+            title: Str<'_>,
+            lines: ApiVec<ApiString>,
+        ) -> ApiResult<()> {
+            host::set_sidebar(server.host(), *self, player, title.as_str(), &lines)
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Removes only this source's sidebar section.
+        pub fn clear_sidebar(&self, server: &Server<'_>, player: PlayerId) -> ApiResult<()> {
+            host::clear_sidebar(server.host(), *self, player)
                 .map_err(ApiString::from)
                 .into()
         }
 
         /// Shows or updates a boss bar; only changed fields are sent.
-        pub fn set_boss_bar(&self, player: PlayerId, id: Uuid, bar: BossBar) -> ApiResult<()> {
-            host::set_boss_bar(self.host(), player, id, &bar)
+        pub fn set_boss_bar(
+            &self,
+            server: &Server<'_>,
+            player: PlayerId,
+            id: Uuid,
+            bar: BossBar,
+        ) -> ApiResult<()> {
+            host::set_boss_bar(server.host(), *self, player, id, &bar, None)
                 .map_err(ApiString::from)
                 .into()
         }
 
-        /// Removes a boss bar.
-        pub fn remove_boss_bar(&self, player: PlayerId, id: Uuid) -> ApiResult<()> {
-            host::remove_boss_bar(self.host(), player, id)
+        /// Publishes a boss bar whose progress follows a gauge compound.
+        pub fn set_gauge_bar(
+            &self,
+            server: &Server<'_>,
+            player: PlayerId,
+            id: Uuid,
+            bar: BossBar,
+            gauge: Str<'_>,
+        ) -> ApiResult<()> {
+            host::set_boss_bar(server.host(), *self, player, id, &bar, Some(gauge.as_str()))
                 .map_err(ApiString::from)
                 .into()
         }
 
-        /// Replaces a player's tab list header and footer, hiding the server's TPS footer.
+        /// Removes only this source's bar with this local UUID.
+        pub fn remove_boss_bar(
+            &self,
+            server: &Server<'_>,
+            player: PlayerId,
+            id: Uuid,
+        ) -> ApiResult<()> {
+            host::remove_boss_bar(server.host(), *self, player, id)
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Publishes a tab header/footer section alongside other sources and the server default.
         pub fn set_tab_list(
             &self,
+            server: &Server<'_>,
             player: PlayerId,
             header: Str<'_>,
             footer: Str<'_>,
         ) -> ApiResult<()> {
-            host::set_tab_list(self.host(), player, header.as_str(), footer.as_str())
+            host::set_tab_list(
+                server.host(),
+                *self,
+                player,
+                header.as_str(),
+                footer.as_str(),
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
+
+        /// Removes only this source's tab section.
+        pub fn clear_tab_list(&self, server: &Server<'_>, player: PlayerId) -> ApiResult<()> {
+            host::clear_tab_list(server.host(), *self, player)
                 .map_err(ApiString::from)
                 .into()
         }
 
-        /// Returns a player's tab list to the server default.
-        pub fn clear_tab_list(&self, player: PlayerId) -> ApiResult<()> {
-            host::clear_tab_list(self.host(), player)
+        /// Removes all this source's contributions for one player.
+        pub fn clear(&self, server: &Server<'_>, player: PlayerId) -> ApiResult<()> {
+            host::clear(server.host(), *self, player)
                 .map_err(ApiString::from)
                 .into()
+        }
+    }
+
+    impl<'a> Server<'a> {
+        /// Current rendering conflicts, suitable for owner diagnostics.
+        pub fn hud_conflicts(&self, player: PlayerId) -> ApiResult<ApiVec<ApiString>> {
+            host::conflicts(self.host(), player)
+                .map_err(ApiString::from)
+                .into()
+        }
+    }
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "Default HUD helpers follow the shared receiver convention of the Server API"
+)]
+impl Server<'_> {
+    /// Publishes the extension's default sidebar section.
+    #[must_use]
+    pub fn set_sidebar(
+        &self,
+        player: PlayerId,
+        title: Str<'_>,
+        lines: ApiVec<ApiString>,
+    ) -> crate::ApiResult<()> {
+        match default_source() {
+            Ok(source) => source.set_sidebar(self, player, title, lines),
+            Err(error) => Err(error).into(),
+        }
+    }
+    /// Removes this extension's default sidebar section.
+    #[must_use]
+    pub fn clear_sidebar(&self, player: PlayerId) -> crate::ApiResult<()> {
+        match default_source() {
+            Ok(source) => source.clear_sidebar(self, player),
+            Err(error) => Err(error).into(),
+        }
+    }
+    /// Publishes a source-local boss bar.
+    #[must_use]
+    pub fn set_boss_bar(&self, player: PlayerId, id: Uuid, bar: BossBar) -> crate::ApiResult<()> {
+        match default_source() {
+            Ok(source) => source.set_boss_bar(self, player, id, bar),
+            Err(error) => Err(error).into(),
+        }
+    }
+    /// Removes this extension's source-local boss bar.
+    #[must_use]
+    pub fn remove_boss_bar(&self, player: PlayerId, id: Uuid) -> crate::ApiResult<()> {
+        match default_source() {
+            Ok(source) => source.remove_boss_bar(self, player, id),
+            Err(error) => Err(error).into(),
+        }
+    }
+    /// Publishes this extension's default tab section.
+    #[must_use]
+    pub fn set_tab_list(
+        &self,
+        player: PlayerId,
+        header: Str<'_>,
+        footer: Str<'_>,
+    ) -> crate::ApiResult<()> {
+        match default_source() {
+            Ok(source) => source.set_tab_list(self, player, header, footer),
+            Err(error) => Err(error).into(),
+        }
+    }
+    /// Removes this extension's default tab section.
+    #[must_use]
+    pub fn clear_tab_list(&self, player: PlayerId) -> crate::ApiResult<()> {
+        match default_source() {
+            Ok(source) => source.clear_tab_list(self, player),
+            Err(error) => Err(error).into(),
         }
     }
 }

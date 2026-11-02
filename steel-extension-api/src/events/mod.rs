@@ -747,6 +747,12 @@ pub mod api {
     }
 
     impl<'a> DamageEvent<'a> {
+        /// Server capability for a player victim; absent for mob-only events.
+        #[must_use]
+        pub fn player_server(&self) -> StableOption<Server<'a>> {
+            self.host().server.map(Server::from_host).into()
+        }
+
         /// Key of the world the damage happens in.
         #[must_use]
         pub fn world(&self) -> ApiString {

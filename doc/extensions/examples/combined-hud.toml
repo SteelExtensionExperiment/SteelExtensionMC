@@ -1,0 +1,34 @@
+# Merge these sections into config/config.toml, then restart the server.
+# This is a configuration fragment, not an automatically loaded file.
+# Requires the creatures and magic examples to supply the player data below.
+
+[server.hud]
+# An empty title removes the sidebar heading. Line order is entirely owner-defined.
+sidebar_title = ""
+sidebar_lines = [
+  '{"text":"Mana: ${player_mana}/${player_max_mana}","color":"aqua"}',
+  '{"text":"${bar(player_mana, 20)}","color":"blue"}',
+  '{"text":"${creature_1}: ${creature_1_health}/${creature_1_max_health} HP","color":"gold"}',
+  '{"text":"${creature_2}: ${creature_2_health}/${creature_2_max_health} HP","color":"green"}',
+  '{"text":"${creature_3}: ${creature_3_health}/${creature_3_max_health} HP","color":"yellow"}',
+]
+
+# Fields from different extensions can share one component, on any supported surface.
+tab_header = '{"text":"${creature_1} · Mana ${player_mana}/${player_max_mana}","color":"aqua"}'
+tab_footer = '{"text":"${bar(player_mana, 20)}","color":"blue"}'
+
+# Explicit bindings also resolve aliases when multiple extensions publish the same name.
+# Missing data hides the dependent line/component, so empty party slots add no rows.
+# These rows select the first three party slots, independently of the default example HUD.
+[server.hud.aliases]
+player_mana = "magic:state/mana"
+player_max_mana = "magic:state/mana/maximum"
+creature_1 = "creatures:state/party/0/label"
+creature_1_health = "creatures:state/party/0/health"
+creature_1_max_health = "creatures:state/party/0/health/maximum"
+creature_2 = "creatures:state/party/1/label"
+creature_2_health = "creatures:state/party/1/health"
+creature_2_max_health = "creatures:state/party/1/health/maximum"
+creature_3 = "creatures:state/party/2/label"
+creature_3_health = "creatures:state/party/2/health"
+creature_3_max_health = "creatures:state/party/2/health/maximum"

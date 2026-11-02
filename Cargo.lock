@@ -2944,6 +2944,7 @@ dependencies = [
  "tokio-util",
  "toml",
  "uuid",
+ "wincode",
  "zip",
 ]
 

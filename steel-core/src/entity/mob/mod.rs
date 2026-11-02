@@ -49,6 +49,7 @@ use crate::entity::ai::navigation::PathNavigation;
 use crate::entity::ai::path::{PathType, PathfindingContext, PathfindingMalus};
 use crate::entity::ai::sensing::Sensing;
 use crate::entity::ai::walk::WalkPathEvaluator;
+use crate::entity::ai::{controller::MobAiControllerSlot, flight::FlightControl};
 use crate::entity::attribute::{AttributeModifier, AttributeModifierOperation};
 use crate::entity::conversion::{AfterConversion, convert_to as convert_mob};
 use crate::entity::damage::DamageSource;
@@ -169,6 +170,7 @@ pub struct MobBase {
     sensing: SyncMutex<Sensing>,
     controls: SyncMutex<MobControls>,
     navigation: SyncMutex<PathNavigation>,
+    ai_controller: MobAiControllerSlot,
     pathfinding_malus: SyncMutex<PathfindingMalus>,
     persistence_required: SyncMutex<bool>,
     can_pick_up_loot: SyncMutex<bool>,
@@ -205,6 +207,7 @@ impl MobBase {
             sensing: SyncMutex::new(Sensing::new()),
             controls: SyncMutex::new(MobControls::new()),
             navigation: SyncMutex::new(PathNavigation::new()),
+            ai_controller: MobAiControllerSlot::default(),
             pathfinding_malus: SyncMutex::new(PathfindingMalus::new()),
             persistence_required: SyncMutex::new(false),
             can_pick_up_loot: SyncMutex::new(false),
@@ -279,6 +282,12 @@ impl MobBase {
     #[must_use]
     pub const fn navigation(&self) -> &SyncMutex<PathNavigation> {
         &self.navigation
+    }
+
+    /// Optional temporary AI decision controller; native movement still applies.
+    #[must_use]
+    pub const fn ai_controller(&self) -> &MobAiControllerSlot {
+        &self.ai_controller
     }
 
     #[must_use]
@@ -391,6 +400,11 @@ pub trait Mob: LivingEntity + Leashable {
     }
 
     fn custom_server_ai_step(&self) {}
+
+    /// Direct native flight steering, when this mob supports it independently of navigation.
+    fn flight_control(&self) -> Option<&dyn FlightControl> {
+        None
+    }
 
     /// Runs vanilla `Mob.ate`, invoked after an eating goal resolves a block.
     fn ate(&self) {}
@@ -540,7 +554,7 @@ pub trait Mob: LivingEntity + Leashable {
     /// Creates a replacement or split mob and transfers state according to `params`.
     /// The callback finalizes mob-specific state. Returns `None` without changing
     /// the source if it is removed or world, difficulty, factory, mob-type, or
-    /// insertion checks fail.
+    /// insertion checks fail. Attachments may reject destinations they cannot retain.
     fn convert_to(
         &self,
         entity_type: EntityTypeRef,
@@ -1583,9 +1597,11 @@ pub trait Mob: LivingEntity + Leashable {
         if self.tick_count() % 5 == 0 {
             self.update_control_flags();
         }
-        self.tick_goal_selectors(entity);
-        self.tick_path_navigation();
-        self.custom_server_ai_step();
+        if !self.mob_base().ai_controller().tick(entity) {
+            self.tick_goal_selectors(entity);
+            self.tick_path_navigation();
+            self.custom_server_ai_step();
+        }
         self.tick_move_control();
         self.tick_look_control();
         self.tick_jump_control();

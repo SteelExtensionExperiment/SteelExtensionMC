@@ -55,6 +55,16 @@ chat_spam_threshold_seconds = 10
 # Vanilla command spam threshold window in seconds
 command_spam_threshold_seconds = 10
 
+# Extensions contribute independent HUD sections by default. The owner can replace
+# their combined layout using data from any extension. See
+# doc/extensions/examples/combined-hud.toml for a complete creature + mana layout.
+[server.hud]
+# order = ["creatures-example:default", "magic-example:default"]
+# sidebar_title = ""
+# sidebar_lines = ["${creature_1} | Mana: ${player_mana}", "${bar(player_mana, 20)}"]
+# hidden = ["steel:server"] # Hide the default server tab information.
+# tab_header = "Mana: ${player_mana}/${player_max_mana}"
+
 # Optional worker counts for server thread pools. 0 or omitted uses each pool's automatic default.
 [server.threads]
 # Worker threads for the primary Tokio runtime.

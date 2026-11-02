@@ -14,7 +14,7 @@ use super::{
 use crate::player::stats_counter::StatState;
 use crate::{
     chunk_saver::{ChunkStorage, PersistentEntity},
-    entity::{Entity, EntityFireFreezeState, LivingEntity},
+    entity::{CustomData, Entity, EntityFireFreezeState, LivingEntity},
     inventory::{
         container::Container,
         ender_chest::{ENDER_CHEST_SLOTS, PlayerEnderChestContainer},
@@ -126,6 +126,8 @@ pub struct PersistentPlayerData {
 
     /// The tracked statistics of the player with their counters.
     pub stats: Vec<PersistentStat>,
+    /// Shared native and extension custom data belonging to this gameplay domain.
+    pub custom_data: CustomData,
 }
 
 /// A vanilla `RootVehicle` tree persisted with player data.
@@ -188,8 +190,8 @@ pub struct PersistentStat {
 
 impl PersistentPlayerData {
     /// Extracts persistent data from a live player.
-    #[must_use]
-    pub fn from_player(player: &Player) -> Self {
+    pub fn from_player(player: &Player) -> Result<Self, String> {
+        player.attachments.synchronize(player)?;
         let pos = player.position();
         let (yaw, pitch) = player.rotation();
         let delta = player.velocity();
@@ -235,7 +237,7 @@ impl PersistentPlayerData {
         let ender_pearls = Self::ender_pearls_from_player(player);
         let stats = Self::stats_from_player(player);
 
-        Self {
+        Ok(Self {
             pos: [pos.x, pos.y, pos.z],
             motion: [delta.x, delta.y, delta.z],
             rotation: [yaw, pitch],
@@ -279,7 +281,8 @@ impl PersistentPlayerData {
             ender_pearls,
             ender_items,
             stats,
-        }
+            custom_data: player.data().clone(),
+        })
     }
 
     /// Snapshots the player's live in-flight ender pearls for persistence.
@@ -345,6 +348,7 @@ impl Player {
         *self.ender_chest_inventory.lock() = PlayerEnderChestContainer::new();
         *self.food_data.lock() = FoodData::new();
         self.stats.lock().reset();
+        *self.data() = CustomData::default();
 
         let mut experience = Experience::default();
         experience.dirty = true;
@@ -416,6 +420,7 @@ impl PersistentPlayerData {
     fn apply_to_player_inner(&self, player: &Player, restore_location: bool) {
         use glam::DVec3;
 
+        *player.data() = self.custom_data.clone();
         if restore_location {
             // Position
             player

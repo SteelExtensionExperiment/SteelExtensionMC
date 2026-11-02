@@ -623,6 +623,16 @@ pub mod api {
         pub fn target(&self) -> EntityInfo {
             host::entity_info(&self.host().event.target)
         }
+        /// World-space point clicked on this entity, independent of the last movement packet.
+        #[must_use]
+        pub fn hit_position(&self) -> Position {
+            let point = self.host().event.hit_position;
+            Position {
+                x: point.x,
+                y: point.y,
+                z: point.z,
+            }
+        }
         /// Hand used.
         #[must_use]
         pub fn hand(&self) -> Hand {

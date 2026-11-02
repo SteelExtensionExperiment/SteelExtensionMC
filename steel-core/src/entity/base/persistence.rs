@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, sync::Weak};
 
+use crate::entity::custom_data::CustomData;
 use glam::DVec3;
-use simdnbt::owned::NbtCompound;
 use text_components::TextComponent;
 use uuid::Uuid;
 
@@ -30,7 +30,7 @@ pub struct EntityBaseSaveData {
     /// Vanilla scoreboard tags.
     pub tags: BTreeSet<String>,
     /// Vanilla custom data component payload.
-    pub custom_data: NbtCompound,
+    pub custom_data: CustomData,
 }
 
 impl EntityBaseSaveData {
@@ -47,7 +47,7 @@ impl EntityBaseSaveData {
             silent: false,
             glowing: false,
             tags: BTreeSet::new(),
-            custom_data: NbtCompound::new(),
+            custom_data: CustomData::default(),
         }
     }
 

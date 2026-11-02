@@ -8,6 +8,7 @@ mod movement;
 mod persistence;
 mod relationships;
 
+use crate::entity::attachment::EntityAttachment;
 pub use fire_freeze::EntityFireFreezeState;
 pub use movement::{
     EntityGroundContact, EntityMovement, EntityMovementEmission, EntityMovementFlags,
@@ -19,6 +20,7 @@ use relationships::{EntityLifecycleState, EntityRelationshipState};
 
 use std::sync::{Arc, Weak};
 
+use crate::entity::custom_data::CustomData;
 use glam::DVec3;
 use simdnbt::owned::NbtCompound;
 use smallvec::SmallVec;
@@ -26,7 +28,7 @@ use steel_math::{DEGREE_90, DEGREE_360};
 use steel_registry::entity_data::EntityPose;
 use steel_registry::entity_type::EntityDimensions;
 use steel_registry::vanilla_entities;
-use steel_utils::locks::SyncMutex;
+use steel_utils::locks::{MappedSyncMutexGuard, SyncMutex, SyncMutexGuard};
 use steel_utils::{BlockPos, BlockStateId, WorldAabb};
 use text_components::TextComponent;
 use uuid::Uuid;
@@ -383,6 +385,7 @@ impl EntityBaseState {
 /// }
 /// ```
 pub struct EntityBase {
+    attachment: SyncMutex<Option<Weak<dyn EntityAttachment>>>,
     damage_history: DamageHistoryBinding,
     /// Generation counter for this runtime construction of the entity.
     generation: EntityGeneration,
@@ -456,6 +459,7 @@ impl EntityBase {
     ) -> Self {
         Self {
             damage_history: DamageHistoryBinding::default(),
+            attachment: SyncMutex::new(None),
             generation: EntityGeneration::next(),
             id,
             uuid,
@@ -468,6 +472,26 @@ impl EntityBase {
             portal_process: SyncMutex::new(None),
             level_callback: SyncMutex::new(Arc::new(NullEntityCallback)),
         }
+    }
+
+    /// Installs an owner-supplied runtime attachment without forming an entity cycle.
+    pub fn claim_attachment(&self, attachment: &Arc<dyn EntityAttachment>) -> bool {
+        let mut current = self.attachment.lock();
+        if current.is_some() {
+            return false;
+        }
+        *current = Some(Arc::downgrade(attachment));
+        true
+    }
+
+    /// Releases the runtime attachment when its owner relinquishes this entity.
+    pub fn release_attachment(&self) {
+        *self.attachment.lock() = None;
+    }
+
+    /// Copies the attachment handle before invoking any owner-defined callback.
+    pub fn attachment(&self) -> Option<Arc<dyn EntityAttachment>> {
+        self.attachment.lock().as_ref().and_then(Weak::upgrade)
     }
 
     /// Creates a base from persistent vanilla entity fields.
@@ -773,9 +797,15 @@ impl EntityBase {
         self.save_data.lock().tags.iter().cloned().collect()
     }
 
+    /// Locks the same custom compound used by native serialization and extension APIs.
+    /// Mutations must finish before invoking callbacks or world operations.
+    pub fn data(&self) -> MappedSyncMutexGuard<'_, CustomData> {
+        SyncMutexGuard::map(self.save_data.lock(), |saved| &mut saved.custom_data)
+    }
+
     /// Returns a snapshot of vanilla custom data.
     pub fn custom_data(&self) -> NbtCompound {
-        self.save_data.lock().custom_data.clone()
+        self.save_data.lock().custom_data.snapshot()
     }
 
     /// Returns whether this entity's velocity has changed enough to need
@@ -1378,7 +1408,7 @@ impl EntityBase {
 
     /// Replaces vanilla custom data.
     pub fn set_custom_data(&self, custom_data: NbtCompound) {
-        self.save_data.lock().custom_data = custom_data;
+        self.save_data.lock().custom_data = CustomData::from_compound(custom_data);
     }
 
     /// Marks this entity's velocity as needing to be synced to clients.

@@ -222,12 +222,6 @@ impl Player {
             return;
         }
 
-        let world = self.get_world();
-        if self.fire_interact(&world, InteractAction::RightClickAir, packet.hand, None) {
-            self.send_inventory_to_remote();
-            return;
-        }
-
         let current_rotation = self.rotation();
         // Vanilla entity setters discard each non-finite rotation component independently.
         let target_component = |value: f32, current: f32| {
@@ -243,6 +237,12 @@ impl Player {
         );
         if target_rotation != current_rotation {
             self.set_rotation(target_rotation);
+        }
+
+        let world = self.get_world();
+        if self.fire_interact(&world, InteractAction::RightClickAir, packet.hand, None) {
+            self.send_inventory_to_remote();
+            return;
         }
 
         let world = self.get_world();

@@ -9,6 +9,10 @@
 - [Custom items and blocks](extensions/custom-content.md): vanilla client
   representations, independent shapes/properties, automatic collision projection,
   models, mining, and persistence.
+- [Custom data](extensions/custom-data.md): shared typed fields on players and
+  entities, dependency access, atomic updates, and persistence.
+- [Player data and shared HUD](extensions/player-data-and-hud.md): compose
+  scoreboard, boss-bar, and tab contributions with server-owner layouts.
 
 The guides describe the API in this checkout. For complete applications, see the
 [extension examples](../extension-example/README.MD) and

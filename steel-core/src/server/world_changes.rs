@@ -543,14 +543,20 @@ impl Server {
             );
             return Err("domain switch lost ownership before detaching".to_owned());
         }
-        let Some((current_data, residence_token)) =
-            current_world.detach_player_for_domain_switch(&player)
-        else {
-            self.release_player_admission(
-                player.gameprofile.id(),
-                PlayerAdmissionState::Relocating,
-            );
-            return Err("player is not present in the current world".to_owned());
+        let detached = current_world
+            .detach_player_for_domain_switch(&player)
+            .and_then(|state| {
+                state.ok_or_else(|| "player is not present in the current world".to_owned())
+            });
+        let (current_data, residence_token) = match detached {
+            Ok(state) => state,
+            Err(error) => {
+                self.release_player_admission(
+                    player.gameprofile.id(),
+                    PlayerAdmissionState::Relocating,
+                );
+                return Err(error);
+            }
         };
         self.jobs.spawn(DomainSwitchJob::new(
             self,

@@ -1,6 +1,8 @@
 //! Entity events.
 
+use crate::server::Server;
 use glam::DVec3;
+use std::sync::Arc;
 use steel_utils::Identifier;
 use uuid::Uuid;
 
@@ -38,6 +40,8 @@ impl EntityInfo {
 
 /// Damage to a living entity before invulnerability cooldowns and armor apply.
 pub struct EntityDamageEvent {
+    /// Server access for a player victim; mob-only events have no player context.
+    pub player_server: Option<Arc<Server>>,
     /// Key of the world the damage happens in.
     pub world: Identifier,
     /// Damaged entity.

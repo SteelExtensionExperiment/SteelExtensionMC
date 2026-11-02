@@ -617,7 +617,7 @@ impl LivingEntity for ExtensionMob {
     }
 
     fn set_health(&self, health: f32) {
-        let clamped = health.clamp(0.0, self.get_max_health());
+        let clamped = self.clamp_health(health);
         self.entity_data
             .lock()
             .living_entity_mut()

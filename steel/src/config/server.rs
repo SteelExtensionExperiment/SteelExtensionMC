@@ -32,6 +32,9 @@ const MAX_COMPRESSION_LEVEL: i32 = 9;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
+    /// Owner-controlled extension HUD layout and data bindings.
+    #[serde(default)]
+    pub hud: steel_core::player::hud::HudPolicy,
     /// The port the server will listen on.
     pub server_port: u16,
     /// The maximum number of players that can be on the server at once.
@@ -91,6 +94,7 @@ impl ServerConfig {
     #[must_use]
     pub fn into_runtime_config(self) -> RuntimeConfig {
         RuntimeConfig {
+            hud: self.hud,
             max_players: self.max_players,
             view_distance: self.view_distance,
             simulation_distance: self.simulation_distance,

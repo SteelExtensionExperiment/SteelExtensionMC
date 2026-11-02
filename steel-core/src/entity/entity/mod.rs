@@ -4,6 +4,7 @@ use super::*;
 use crate::entity::leash::Leashable;
 use rand::{RngExt, rng};
 use steel_math::DEGREE_90;
+use steel_utils::locks::MappedSyncMutexGuard;
 use steel_utils::nbt::{NbtNumeric, nbt_collection_values};
 
 /// Vanilla `Entity.refreshDimensions` small-entity limit: only entities at most
@@ -1192,6 +1193,13 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// Mirrors vanilla `Entity.canUsePortal`, including `LivingEntity` sleeping
     /// suppression.
     fn can_use_portal(&self, ignore_passenger: bool) -> bool {
+        if self
+            .base()
+            .attachment()
+            .is_some_and(|owner| !owner.can_use_portal())
+        {
+            return false;
+        }
         let entity_type = self.entity_type();
         if entity_type == &vanilla_entities::FISHING_BOBBER
             || entity_type == &vanilla_entities::ENDER_DRAGON
@@ -3006,6 +3014,11 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         self.base().remove_tag(tag)
     }
 
+    /// Locks the entity's shared native and extension custom data.
+    fn data(&self) -> MappedSyncMutexGuard<'_, CustomData> {
+        self.base().data()
+    }
+
     /// Returns a snapshot of this entity's vanilla custom data.
     fn custom_data(&self) -> NbtCompound {
         self.base().custom_data()
@@ -3939,7 +3952,7 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
                 .collect::<BTreeSet<_>>();
         }
         if let Some(custom_data) = nbt.compound("data") {
-            save_data.custom_data = custom_data.to_owned();
+            save_data.custom_data = CustomData::from_compound(custom_data.to_owned());
         }
         self.base().replace_save_data(save_data);
 

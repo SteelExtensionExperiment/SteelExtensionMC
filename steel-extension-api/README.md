@@ -530,7 +530,12 @@ it survives restarts and chests). `Server::slot`, `set_slot`, `held_slot`, `give
 | Module | |
 |---|---|
 | `effects` | `World::spawn_particle(Particle)` with dust/color/block options and `Particle::note(pos, pitch)`; `World::play_sound`; per-player `play_sound_to`, `add_effect`/`remove_effect`, `give_experience`/`give_levels`, `set_walk_speed`/`set_fly_speed` |
-| `hud` | per-player sidebar (diffed, up to 15 lines), boss bars by extension-chosen UUID, tab list header/footer override |
+| `hud` | owner-bound sidebar/tab sections, isolated boss bars, data templates and owner layout configuration ([guide](../doc/extensions/player-data-and-hud.md)) |
+| `data` | one typed custom-data store for players and entities, shared namespaced fields and atomic numeric updates ([guide](../doc/extensions/custom-data.md)) |
+| `projectiles` | custom item projectiles with native movement/collision and synchronous impact callbacks |
+| `world_effects` | native entity damage, health, effects, ignition and damage-tag classification |
+| `terrain` | conditional temporary blocks with chunk-persisted restoration and edit protection |
+| `entities` | native entity snapshots and external persistence, explicit health policies, lifecycle identities and cancellable AI controls; gameplay rules belong to extensions |
 | `menus` | read-only chest GUIs: `menus::handler(\|server, click\| ..)` once, then `server.open_menu_with(player, title, rows, items, handler)`; `set_menu_item`, `close_menu`. Clicks never move items and are routed before any container lock, so handlers may change inventories |
 | `worlds` | `Server::with_world(key, \|world\| ..)` from scheduled tasks, day time and weather, `drop_item`, `remove_entity`, `strike_lightning_effect`, `send_plugin_message` |
 | `fill` | `World::fill(FillRequest)` below |

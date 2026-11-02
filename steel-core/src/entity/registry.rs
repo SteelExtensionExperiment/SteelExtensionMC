@@ -101,6 +101,14 @@ pub struct EntityRegistry {
 }
 
 impl EntityRegistry {
+    /// Whether this type can be reconstructed from its native saved state.
+    #[must_use]
+    pub fn supports_loading(&self, entity_type: EntityTypeRef) -> bool {
+        self.entries
+            .get(entity_type.id())
+            .is_some_and(|entry| entry.load_factory.is_some())
+    }
+
     fn finish_registered_load_view(entity: &SharedEntity, nbt: &BorrowedNbtCompoundView<'_, '_>) {
         let yaw = entity.rotation().0;
         if let Some(living) = entity.as_living_entity() {
@@ -108,6 +116,9 @@ impl EntityRegistry {
             living.set_y_body_rot(yaw);
         }
 
+        if let Some(living) = entity.as_living_entity() {
+            living.living_base().load_persistent_state(living, *nbt);
+        }
         entity.load_additional(*nbt);
         entity.set_old_position_to_current();
         entity.base().set_old_rotation_to_current();

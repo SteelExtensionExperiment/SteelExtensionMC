@@ -1,4 +1,5 @@
 //! Chunk data retained from generation through Full runtime use.
+use crate::chunk::block_attachment::BlockAttachment;
 use std::fmt::{self, Formatter};
 use std::sync::{
     Arc, OnceLock, Weak,
@@ -73,6 +74,8 @@ impl fmt::Debug for TransientGenerationState {
 /// Canonical chunk storage retained across generation and Full runtime phases.
 #[derive(Debug)]
 pub struct Chunk {
+    /// Owner-defined block claims, saved atomically with the block palette.
+    pub(crate) block_attachments: SyncMutex<FxHashMap<BlockPos, Arc<BlockAttachment>>>,
     /// The sections of the chunk.
     pub sections: Sections,
     /// The position of the chunk.
@@ -127,6 +130,7 @@ impl Chunk {
     ) -> Self {
         Self {
             sections,
+            block_attachments: SyncMutex::new(FxHashMap::default()),
             pos,
             dirty: AtomicBool::new(true), // New chunks are always dirty
             heightmaps: SyncRwLock::new(ChunkHeightmaps::empty()),
@@ -182,6 +186,7 @@ impl Chunk {
 
         let chunk = Self {
             sections,
+            block_attachments: SyncMutex::new(FxHashMap::default()),
             pos,
             dirty: AtomicBool::new(false),
             heightmaps: SyncRwLock::new(heightmaps),

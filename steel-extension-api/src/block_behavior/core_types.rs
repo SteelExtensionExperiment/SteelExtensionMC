@@ -41,3 +41,5 @@ pub use simdnbt::{borrow::BaseNbtCompound as BorrowedNbtCompound, owned::NbtComp
 pub use steel_core::{block_entity::BlockEntityBase, inventory::lock::ContainerRef};
 
 pub type ExplosionDropConsumer<'a> = dyn FnMut(ItemStack, BlockPos) + 'a;
+
+pub use simdnbt::owned::NbtTag;

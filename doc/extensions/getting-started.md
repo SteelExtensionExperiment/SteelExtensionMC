@@ -230,7 +230,8 @@ trusted. ABI checks detect incompatible boundary signatures, not malicious code.
 | Configuration parsing failed | Add `[extensions.config]` with `message`; match the extension's own schema. |
 | Command unavailable | Connect as a player, check command permissions, and check startup logs for registration collisions. |
 
-Continue with the [API reference](api.md), the
+Continue with the [API reference](api.md), [player and entity custom data](custom-data.md),
+or [shared HUD layouts](player-data-and-hud.md). For focused examples, see
 [wool shearing](../../extension-example/wool-shearing/README.md) for block behaviors,
 [Game of Life](../../extension-example/game-of-life/README.md) for world ticks,
 [strange terrain](../../extension-example/strange-terrain/README.md) for generation,

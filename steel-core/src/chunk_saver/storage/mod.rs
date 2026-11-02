@@ -1,3 +1,4 @@
+use std::mem;
 use std::{
     cmp::Ordering as CmpOrdering,
     io::{self, Cursor},
@@ -59,6 +60,7 @@ use steel_worldgen::structure::{
     TemplatePlacementClip, TemplatePostProcess, TemplateProcessorList,
 };
 
+mod block_attachments;
 mod chunk;
 mod entities;
 mod light;
@@ -358,6 +360,7 @@ fn homogeneous_packed_light_value(data: &[u8; DATA_LAYER_SIZE]) -> Option<u8> {
 enum EntityPersistenceMode {
     ChunkSave,
     DimensionTransition,
+    OwnedSnapshot,
 }
 
 use super::ram_only::RamOnlyStorage;
@@ -677,7 +680,7 @@ impl ChunkStorage {
             chunk.postprocessing.lock().iter().map(Vec::clone).collect()
         };
 
-        let persistent = Self::to_persistent(
+        let mut persistent = Self::to_persistent(
             chunk.sections(),
             &block_entities,
             &pending_block_entities,
@@ -692,6 +695,30 @@ impl ChunkStorage {
             pois,
             pos,
         );
+        let mut builder = ChunkBuilder {
+            block_states: mem::take(&mut persistent.block_states),
+            biomes: Vec::new(),
+            registry: &REGISTRY,
+        };
+        let records = chunk.block_attachments.lock();
+        let mut ordered: Vec<_> = records.iter().collect();
+        ordered.sort_by_key(|(pos, _)| (pos.0.x, pos.0.y, pos.0.z));
+        persistent.block_attachments = ordered
+            .into_iter()
+            .map(|(pos, record)| super::format::PersistentBlockAttachment {
+                x: (pos.0.x & 15) as u8,
+                y: pos.0.y,
+                z: (pos.0.z & 15) as u8,
+                key: record.key.clone(),
+                states: record
+                    .states
+                    .iter()
+                    .map(|state| builder.ensure_block_state(*state))
+                    .collect(),
+                data: record.data.clone(),
+            })
+            .collect();
+        persistent.block_states = builder.block_states;
 
         Some(PreparedChunkSave {
             pos,
@@ -791,6 +818,7 @@ impl ChunkStorage {
         let persistent_entities = Self::entities_to_persistent(entities);
 
         PersistentChunk {
+            block_attachments: Vec::new(),
             last_modified: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs() as u32),

@@ -149,3 +149,8 @@ const _: fn() = || {
 unsafe impl Send for BlockEntity {}
 // SAFETY: shared access only exposes the thread-safe Arc payload through host methods.
 unsafe impl Sync for BlockEntity {}
+
+host_value!(data_value_storage, DataValue = core_types::NbtTag; read,write);
+
+// A checked weak target, resolved anew for every operation.
+host_value!(entity_data_storage, EntityData = crate::host::data::Target; read);

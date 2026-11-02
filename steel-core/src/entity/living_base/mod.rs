@@ -5,6 +5,8 @@
 //! embed this struct and expose it via `LivingEntity::living_base()`, just like
 //! `EntityBase` is used for core `Entity` fields.
 
+mod persistence;
+
 use std::{array, mem, sync::Arc};
 
 use glam::DVec3;
@@ -638,6 +640,7 @@ struct LivingEntityState {
     last_hurt_by_player_entity: Option<WeakEntity>,
     last_hurt_by_player_memory_time: i32,
     last_hurt_by_mob: Option<WeakEntity>,
+    last_hurt_by_mob_uuid: Option<Uuid>,
     last_hurt_by_mob_timestamp: i32,
     last_hurt_mob: Option<WeakEntity>,
     last_hurt_mob_timestamp: i32,
@@ -675,6 +678,7 @@ impl LivingEntityState {
             last_hurt_by_player_entity: None,
             last_hurt_by_player_memory_time: 0,
             last_hurt_by_mob: None,
+            last_hurt_by_mob_uuid: None,
             last_hurt_by_mob_timestamp: 0,
             last_hurt_mob: None,
             last_hurt_mob_timestamp: 0,
@@ -1234,7 +1238,7 @@ impl LivingEntityBase {
                     amount: modifier.amount * f64::from(effect.amplifier + 1),
                     operation: modifier.operation,
                 },
-                false,
+                true,
             );
         }
     }
@@ -1666,7 +1670,23 @@ impl LivingEntityBase {
     pub fn set_last_hurt_by_mob(&self, target: Option<&SharedEntity>, tick_count: i32) {
         let mut state = self.state.lock();
         state.last_hurt_by_mob = weak_living_entity(target);
+        state.last_hurt_by_mob_uuid = target.map(|entity| entity.uuid());
         state.last_hurt_by_mob_timestamp = tick_count;
+    }
+
+    pub(crate) fn last_hurt_by_mob_uuid(&self) -> Option<Uuid> {
+        self.state.lock().last_hurt_by_mob_uuid
+    }
+    pub(crate) fn resolve_last_hurt_by_mob(&self, world: &World) -> Option<SharedEntity> {
+        let uuid = self.state.lock().last_hurt_by_mob_uuid?;
+        let entity = world
+            .get_entity_in_domain_by_uuid(&uuid)
+            .filter(|entity| !entity.is_removed() && entity.as_living_entity().is_some())?;
+        let mut state = self.state.lock();
+        if state.last_hurt_by_mob_uuid == Some(uuid) {
+            state.last_hurt_by_mob = Some(Arc::downgrade(&entity));
+        }
+        Some(entity)
     }
 
     /// Returns vanilla `LivingEntity.lastHurtMob`, if still resolvable.

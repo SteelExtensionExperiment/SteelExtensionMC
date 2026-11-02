@@ -758,7 +758,11 @@ fn apply_effects_from_block_movements(entity: &dyn Entity, movements: &[EntityMo
 mod ageable;
 pub(crate) mod ai;
 mod animal;
+pub mod attachment;
+pub use ai::controller::MobAiController;
 pub mod attribute;
+pub mod custom_data;
+pub use custom_data::CustomData;
 mod base;
 mod block_attached_entity;
 mod block_effects;
@@ -822,7 +826,9 @@ pub use callback::{
     EntityChunkCallback, EntityLevelCallback, InactiveEntityCallback, NullEntityCallback,
     PlayerEntityCallback, RemovalReason,
 };
-pub use conversion::{AfterConversion, ConversionParams, ConversionType};
+pub use conversion::{
+    AfterConversion, ConversionParams, ConversionType, convert_to as convert_mob,
+};
 pub(crate) use entity::apply_entity_look_at;
 pub(crate) use entity::nbt_dvec3;
 pub(crate) use entity::position_rider_default;

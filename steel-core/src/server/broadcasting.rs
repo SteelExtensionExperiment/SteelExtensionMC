@@ -1,5 +1,5 @@
 use super::{
-    Arc, CEntityEvent, CSystemChat, CTabList, CTickingState, CTickingStep, Color, CommandSender,
+    Arc, CEntityEvent, CSystemChat, CTickingState, CTickingStep, Color, CommandSender,
     CommandSource, DisplayResolutor, Entity, Modifier, Player, Server, SprintReport,
     TabListTickStats, TextComponent, Uuid, client_permission_event, command_tree_packet,
     translations,
@@ -68,9 +68,7 @@ impl Server {
         let (header, footer) = Self::tab_list_components(tick_stats);
 
         self.online_players.iter_players(|_, player| {
-            if !player.has_tab_list_override() {
-                player.send_packet(CTabList::new(&header, &footer, player));
-            }
+            player.set_server_tab(header.clone(), footer.clone());
             true
         });
     }

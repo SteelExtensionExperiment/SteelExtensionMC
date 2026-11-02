@@ -698,6 +698,7 @@ impl Player {
                 |player| crate::extension::events::PlayerInteractEntityEvent {
                     player,
                     target: crate::extension::events::EntityInfo::of(target.as_ref()),
+                    hit_position: target.position() + packet.location,
                     hand: packet.hand,
                     cancelled: false,
                 },

@@ -44,6 +44,7 @@ fn visible_homogeneous_value(section: Option<&LightSection>) -> Option<u8> {
     Some(*value)
 }
 
+mod block_attachments;
 mod chunks_sections;
 mod entities;
 mod light;

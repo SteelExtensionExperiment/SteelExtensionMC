@@ -91,7 +91,17 @@ pub(crate) type CommandAccess<'a> = Access<'a, PlayerCommandEvent>;
 pub(crate) type BreakAccess<'a> = Access<'a, CoreBreak>;
 pub(crate) type PlaceAccess<'a> = Access<'a, CorePlace>;
 pub(crate) type InteractAccess<'a> = Access<'a, PlayerInteractEvent>;
-pub(crate) type DamageAccess<'a> = BareAccess<'a, EntityDamageEvent>;
+pub(crate) struct DamageAccess<'a> {
+    pub event: &'a mut EntityDamageEvent,
+    pub read_only: bool,
+    pub server: Option<&'a Arc<CoreServer>>,
+}
+impl DamageAccess<'_> {
+    pub(crate) const fn writable(&self) -> bool {
+        !self.read_only
+    }
+}
+
 pub(crate) type DeathAccess<'a> = Access<'a, PlayerDeathEvent>;
 pub(crate) type MoveAccess<'a> = Access<'a, PlayerMoveEvent>;
 pub(crate) type TeleportAccess<'a> = Access<'a, PlayerTeleportEvent>;
@@ -250,7 +260,37 @@ player_handler!(
     PlayerInteractEvent,
     InteractEvent
 );
-bare_handler!(DamageHandler, damage, EntityDamageEvent, DamageEvent);
+struct DamageHandler {
+    callback: extern "C" fn(DamageEvent<'_>, u64),
+    token: u64,
+}
+impl EventHandler<EntityDamageEvent> for DamageHandler {
+    fn handle(&self, event: &mut EntityDamageEvent, priority: CorePriority) {
+        let server = event.player_server.as_ref().map(Arc::clone);
+        let mut access = DamageAccess {
+            event,
+            read_only: priority == CorePriority::Monitor,
+            server: server.as_ref(),
+        };
+        (self.callback)(DamageEvent::from_host(&mut access), self.token);
+    }
+}
+pub(crate) fn damage(
+    hooks: &mut HookRegistration<'_>,
+    priority: EventPriority,
+    ignore_cancelled: bool,
+    callback: extern "C" fn(DamageEvent<'_>, u64),
+    token: u64,
+) {
+    subscribe_to(
+        hooks,
+        |events| &mut events.damage,
+        priority,
+        ignore_cancelled,
+        Box::new(DamageHandler { callback, token }),
+    );
+}
+
 player_handler!(DeathHandler, death, PlayerDeathEvent, DeathEvent);
 player_handler!(MoveHandler, movement, PlayerMoveEvent, MoveEvent);
 player_handler!(

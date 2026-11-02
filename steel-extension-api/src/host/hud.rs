@@ -2,10 +2,10 @@
 use super::{events::parse_text, players::find};
 use crate::{
     PlayerId,
-    hud::{BarColor, BarStyle, BossBar},
+    hud::{BarColor, BarStyle, BossBar, Source},
     players::Uuid,
 };
-use stabby::string::String as ApiString;
+use stabby::{string::String as ApiString, vec::Vec as ApiVec};
 use steel_core::{player::hud, server::Server as CoreServer};
 use steel_protocol::packets::game::{BossBarColor, BossBarOverlay};
 
@@ -37,61 +37,107 @@ const fn uuid(id: Uuid) -> uuid::Uuid {
 
 pub(crate) fn set_sidebar(
     server: &CoreServer,
+    owner: Source,
     id: PlayerId,
     title: &str,
     lines: &[ApiString],
 ) -> Result<(), String> {
-    let lines: Vec<_> = lines.iter().map(|line| parse_text(line.as_str())).collect();
-    find(server, id)?.set_sidebar(parse_text(title), &lines);
-    Ok(())
+    find(server, id)?.set_hud_sidebar(
+        &hud::catalog::source(owner.id)?,
+        Some(hud::SidebarSection {
+            title: title.to_owned(),
+            lines: lines.iter().map(ToString::to_string).collect(),
+        }),
+    )
 }
 
-pub(crate) fn clear_sidebar(server: &CoreServer, id: PlayerId) -> Result<(), String> {
-    find(server, id)?.clear_sidebar();
-    Ok(())
+pub(crate) fn clear_sidebar(
+    server: &CoreServer,
+    owner: Source,
+    id: PlayerId,
+) -> Result<(), String> {
+    find(server, id)?.set_hud_sidebar(&hud::catalog::source(owner.id)?, None)
 }
 
 pub(crate) fn set_boss_bar(
     server: &CoreServer,
+    owner: Source,
     id: PlayerId,
     bar_id: Uuid,
     bar: &BossBar,
+    gauge: Option<&str>,
 ) -> Result<(), String> {
     let flags =
         u8::from(bar.darken_screen) | u8::from(bar.boss_music) << 1 | u8::from(bar.fog) << 2;
-    find(server, id)?.set_boss_bar(
+    find(server, id)?.set_hud_bar(
+        &hud::catalog::source(owner.id)?,
         uuid(bar_id),
-        hud::BossBar {
-            title: parse_text(bar.title.as_str()),
-            progress: bar.progress,
-            color: color(bar.color),
-            overlay: overlay(bar.style),
-            flags,
-        },
-    );
-    Ok(())
+        Some(hud::BarContribution {
+            title: bar.title.to_string(),
+            gauge: gauge.map(str::to_owned),
+            bar: hud::BossBar {
+                title: parse_text(bar.title.as_str()),
+                progress: bar.progress,
+                color: color(bar.color),
+                overlay: overlay(bar.style),
+                flags,
+            },
+        }),
+    )
 }
 
 pub(crate) fn remove_boss_bar(
     server: &CoreServer,
+    owner: Source,
     id: PlayerId,
     bar_id: Uuid,
 ) -> Result<(), String> {
-    find(server, id)?.remove_boss_bar(uuid(bar_id));
-    Ok(())
+    find(server, id)?.set_hud_bar(&hud::catalog::source(owner.id)?, uuid(bar_id), None)
 }
 
 pub(crate) fn set_tab_list(
     server: &CoreServer,
+    owner: Source,
     id: PlayerId,
     header: &str,
     footer: &str,
 ) -> Result<(), String> {
-    find(server, id)?.set_tab_list_override(parse_text(header), parse_text(footer));
-    Ok(())
+    find(server, id)?.set_hud_tab(
+        &hud::catalog::source(owner.id)?,
+        Some(hud::TabSection {
+            header: header.to_owned(),
+            footer: footer.to_owned(),
+        }),
+    )
 }
 
-pub(crate) fn clear_tab_list(server: &CoreServer, id: PlayerId) -> Result<(), String> {
-    find(server, id)?.clear_tab_list_override();
-    Ok(())
+pub(crate) fn clear_tab_list(
+    server: &CoreServer,
+    owner: Source,
+    id: PlayerId,
+) -> Result<(), String> {
+    find(server, id)?.set_hud_tab(&hud::catalog::source(owner.id)?, None)
+}
+
+pub(crate) fn source(owner: &str, key: &str) -> Result<Source, String> {
+    hud::catalog::register(owner, key).map(|id| Source { id })
+}
+
+pub(crate) fn bind(source: Source, alias: &str, path: &str) -> Result<(), String> {
+    hud::catalog::bind(source.id, alias, path)
+}
+
+pub(crate) fn clear(server: &CoreServer, source: Source, player: PlayerId) -> Result<(), String> {
+    find(server, player)?.clear_hud_source(&hud::catalog::source(source.id)?)
+}
+
+pub(crate) fn conflicts(
+    server: &CoreServer,
+    player: PlayerId,
+) -> Result<ApiVec<ApiString>, String> {
+    Ok(find(server, player)?
+        .hud_conflicts()
+        .into_iter()
+        .map(ApiString::from)
+        .collect())
 }

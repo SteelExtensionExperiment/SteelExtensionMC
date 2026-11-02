@@ -152,7 +152,7 @@ impl DomainSwitchJob {
         server.queue_relocating_player_disconnect(
             Arc::clone(&self.player),
             self.source_domain.clone(),
-            source_data,
+            Ok(source_data),
             self.pending_token,
         );
         JobPoll::Finished
@@ -265,7 +265,7 @@ impl DomainSwitchJob {
             server.queue_relocating_player_disconnect(
                 Arc::clone(&self.player),
                 self.target_domain.clone(),
-                Arc::new(target_data),
+                target_data.map(Arc::new),
                 self.pending_token,
             );
             return JobPoll::Finished;

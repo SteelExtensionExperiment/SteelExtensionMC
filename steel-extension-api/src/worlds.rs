@@ -20,6 +20,10 @@ pub enum Weather {
     Thunder,
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "World bindings consistently borrow their capability handle"
+)]
 #[stabby::host_api]
 /// World, entity and messaging bindings.
 pub mod api {
@@ -60,7 +64,7 @@ pub mod api {
     }
 
     impl<'a> World<'a> {
-        /// Vanilla game time: ticks this world has run, unaffected by `/time set`.
+        /// The domain's persistent simulation clock, independent of day/night commands.
         #[must_use]
         pub fn game_time(&self) -> i64 {
             self.host().game_time()

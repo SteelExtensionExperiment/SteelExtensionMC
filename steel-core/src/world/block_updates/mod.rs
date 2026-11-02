@@ -1,4 +1,5 @@
 use super::*;
+use crate::chunk::block_attachment::BlockAttachment;
 use crate::chunk::{Chunk, gameplay_chunk_lookup_cache::LocalFullChunkHolderCache};
 
 mod neighbor_updater;
@@ -246,6 +247,38 @@ impl World {
         flags: UpdateFlags,
         update_limit: i32,
     ) -> ConditionalBlockSetResult {
+        self.set_block_state_claim(pos, expected_state, new_state, flags, update_limit, None)
+    }
+
+    /// Writes a block and its owner data atomically. A prior attachment rejects the
+    /// claim; subsequent state changes remove the data before block callbacks run.
+    pub fn set_block_with_attachment(
+        self: &Arc<Self>,
+        pos: BlockPos,
+        expected: BlockStateId,
+        placed: BlockStateId,
+        flags: UpdateFlags,
+        attachment: Arc<BlockAttachment>,
+    ) -> ConditionalBlockSetResult {
+        self.set_block_state_claim(
+            pos,
+            expected,
+            placed,
+            flags,
+            Self::UPDATE_LIMIT,
+            Some(attachment),
+        )
+    }
+
+    fn set_block_state_claim(
+        self: &Arc<Self>,
+        pos: BlockPos,
+        expected_state: BlockStateId,
+        new_state: BlockStateId,
+        flags: UpdateFlags,
+        update_limit: i32,
+        attachment: Option<Arc<BlockAttachment>>,
+    ) -> ConditionalBlockSetResult {
         if !self.is_in_valid_bounds(pos) {
             return ConditionalBlockSetResult::Unavailable;
         }
@@ -253,8 +286,15 @@ impl World {
         let chunk_pos = Self::chunk_pos_for_block(pos);
         let Some(result) = self
             .chunk_map
-            .with_full_chunk(chunk_pos, |chunk| {
-                chunk.set_block_state_if_unchanged(pos, expected_state, new_state, flags)
+            .with_full_chunk(chunk_pos, |chunk| match attachment {
+                Some(attachment) => chunk.set_block_with_attachment(
+                    pos,
+                    expected_state,
+                    new_state,
+                    attachment,
+                    flags,
+                ),
+                None => chunk.set_block_state_if_unchanged(pos, expected_state, new_state, flags),
             })
             .flatten()
         else {
@@ -273,7 +313,7 @@ impl World {
         }
     }
 
-    pub(super) fn finish_block_set(
+    pub(crate) fn finish_block_set(
         self: &Arc<Self>,
         pos: BlockPos,
         old_state: BlockStateId,

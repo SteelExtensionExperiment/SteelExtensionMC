@@ -10,6 +10,10 @@ use tokio::sync::{Mutex, RwLock};
 
 /// A synchronous mutex.
 pub type SyncMutex<T> = parking_lot::Mutex<T>;
+/// A guard holding the standard synchronous mutex.
+pub type SyncMutexGuard<'a, T> = parking_lot::MutexGuard<'a, T>;
+/// A guard restricted to one field of a synchronous mutex's protected value.
+pub type MappedSyncMutexGuard<'a, T> = parking_lot::MappedMutexGuard<'a, T>;
 /// A synchronous read-write lock.
 pub type SyncRwLock<T> = parking_lot::RwLock<T>;
 

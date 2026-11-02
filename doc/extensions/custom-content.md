@@ -430,3 +430,8 @@ registered, in a loaded chunk and returns its UUID.
 `World::count_entities(key, center, radius)` counts the live ones nearby. Steel
 has no natural spawner yet, so extensions spawn their mobs themselves; the
 toxic-wasteland example spawns them around players on a server tick.
+
+Each mob instance can also store typed, namespaced custom fields through
+`mob.data()` in these callbacks, or `World::entity_data(id)`. Players use the
+same `data::Store` operations. See [custom data](custom-data.md) for examples,
+sharing, persistence, and lifecycle rules.

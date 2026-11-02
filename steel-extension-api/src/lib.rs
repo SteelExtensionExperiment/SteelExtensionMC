@@ -8,7 +8,9 @@ pub mod block_behavior;
 mod callbacks;
 pub mod command;
 pub mod content;
+pub mod data;
 pub mod effects;
+pub mod entities;
 pub mod entity_behavior;
 mod entry;
 pub mod events;
@@ -20,10 +22,13 @@ pub mod items;
 pub mod log;
 pub mod menus;
 pub mod players;
+pub mod projectiles;
 pub mod runtime;
 pub mod scheduler;
 pub mod services;
+pub mod terrain;
 pub mod text;
+pub mod world_effects;
 pub mod worlds;
 pub use runtime::{
     BotInput, Difficulty, GameMode, Operation, OperationState, OperationStatus, PlayerControls,
@@ -67,6 +72,12 @@ pub fn bind(bootstrap: Bootstrap) -> Result<(), BindError> {
         .chain(items::api::imports())
         .chain(effects::api::imports())
         .chain(hud::api::imports())
+        .chain(data::api::imports())
+        .chain(projectiles::api::imports())
+        .chain(world_effects::api::imports())
+        .chain(terrain::api::imports())
+        .chain(entities::api::imports())
+        .chain(entities::control::api::imports())
         .chain(worlds::api::imports())
         .chain(menus::api::imports())
         .chain(fill::api::imports())
@@ -220,12 +231,15 @@ macro_rules! export_extension {
             bootstrap: extern "C" fn(
                 $crate::stabby::host::RegistrationHook<'_>,
             ) -> $crate::stabby::host::RegistrationStatus,
-            hooks: $crate::Hooks<'_>,
+            mut hooks: $crate::Hooks<'_>,
         ) -> $crate::ApiResult<()> {
             if let Err(error) = $crate::bind(bootstrap) {
                 return Err($crate::stabby::string::String::from(error.to_string())).into();
             }
             $crate::log::set_extension_name($name);
+            if let Err(error) = $crate::hud::bind_default_source(&mut hooks) {
+                return Err(error).into();
+            }
             $crate::IntoApiResult::into_api_result($pre_init(hooks))
         }
         #[$crate::stabby::export(callback, crate = $crate::stabby)]
@@ -250,3 +264,6 @@ macro_rules! export_extension {
         }
     };
 }
+
+#[cfg(all(test, feature = "host"))]
+extern crate self as steel_extension_api;

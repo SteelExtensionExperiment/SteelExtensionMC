@@ -71,7 +71,7 @@ impl ConversionType {
 
 /// Unlike vanilla, inserts the new mob before transferring state so
 /// rejected insertions leave the source, passengers, and leash untouched.
-pub(crate) fn convert_to(
+pub fn convert_to(
     from: &dyn Mob,
     entity_type: EntityTypeRef,
     params: ConversionParams,
@@ -107,12 +107,31 @@ pub(crate) fn convert_to(
         return None;
     };
 
+    let attachment = params
+        .conversion_type
+        .should_discard_after_conversion()
+        .then(|| from.base().attachment())
+        .flatten();
+    if attachment
+        .as_ref()
+        .is_some_and(|owner| !owner.can_convert(&to))
+    {
+        return None;
+    }
+
     if let Err(error) = world.try_add_entity(Arc::clone(&to)) {
         log::error!(
             "failed to add converted {} for {}: {error}",
             to_mob.entity_type().key,
             from.entity_type().key
         );
+        return None;
+    }
+
+    if let Some(attachment) = attachment
+        && !attachment.replace_converted(from.base(), &to)
+    {
+        to.set_removed(RemovalReason::Discarded);
         return None;
     }
 

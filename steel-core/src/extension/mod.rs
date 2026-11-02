@@ -75,6 +75,7 @@ pub struct ExtensionInfo {
 #[derive(Default)]
 pub struct ExtensionHooks {
     world_ticks: Vec<Box<dyn WorldTickHandler>>,
+    block_ticks: Vec<Box<dyn WorldTickHandler>>,
     server_ticks: Vec<Box<dyn ServerTickHandler>>,
     server_stops: Vec<Box<dyn ServerStopHandler>>,
     stopped: AtomicBool,
@@ -85,6 +86,16 @@ pub struct ExtensionHooks {
 }
 
 impl ExtensionHooks {
+    /// Registers synchronous work after chunk ticks and before block events and entities.
+    pub fn register_world_block_tick(&mut self, handler: Box<dyn WorldTickHandler>) {
+        self.block_ticks.push(handler);
+    }
+    pub(crate) fn tick_world_blocks(&self, world: &Arc<World>, tick_count: u64) {
+        for handler in &self.block_ticks {
+            handler.tick(world, tick_count);
+        }
+    }
+
     /// Registers a notification for orderly shutdown.
     pub fn register_server_stop(&mut self, handler: Box<dyn ServerStopHandler>) {
         self.server_stops.push(handler);

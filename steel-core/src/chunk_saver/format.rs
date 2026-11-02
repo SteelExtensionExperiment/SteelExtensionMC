@@ -59,7 +59,9 @@ pub const REGION_MAGIC: [u8; 4] = *b"STLR";
 /// v21: Matched vanilla scheduled-tick persistence by rebuilding sub-tick order on load.
 /// v22: Preserve Vanilla pending `DUMMY` block entities across chunk stages.
 /// v23: Replaced Noise, Surface, and Carvers with Terrain status; removed persisted carving masks.
-pub const FORMAT_VERSION: u16 = 23;
+/// v24: Persist temporary terrain restoration with its chunk.
+/// v25: Replace terrain-specific records with namespaced block attachments.
+pub const FORMAT_VERSION: u16 = 25;
 
 /// Number of chunks per region side (32×32 = 1024 chunks per region).
 pub const REGION_SIZE: usize = 32;
@@ -362,6 +364,8 @@ impl PersistentLightSection {
 /// self-contained. Sections reference indices into these chunk-level palettes.
 #[derive(SchemaWrite, SchemaRead)]
 pub struct PersistentChunk<'a> {
+    /// Owner data for block-state claims, referencing this chunk's state palette.
+    pub block_attachments: Vec<PersistentBlockAttachment>,
     /// Unix timestamp of last modification.
     pub last_modified: u32,
     /// Block states used in this chunk. Sections reference indices into this.
@@ -390,6 +394,23 @@ pub struct PersistentChunk<'a> {
     pub structure_references: Vec<PersistentStructureReference>,
     /// POI occupancy data (ticket state for beds, workstations, etc.).
     pub pois: Vec<PersistentPoi>,
+}
+
+/// Persistent owner data tied to a block-state claim.
+#[derive(SchemaWrite, SchemaRead)]
+pub struct PersistentBlockAttachment {
+    /// Chunk-local x coordinate.
+    pub x: u8,
+    /// Absolute y coordinate.
+    pub y: i32,
+    /// Chunk-local z coordinate.
+    pub z: u8,
+    /// Namespaced payload format.
+    pub key: Identifier,
+    /// Referenced states in the chunk palette.
+    pub states: Vec<u16>,
+    /// Owner-defined payload.
+    pub data: Vec<u8>,
 }
 
 /// A 16×16×16 section of a chunk.

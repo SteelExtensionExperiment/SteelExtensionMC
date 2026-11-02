@@ -1,4 +1,5 @@
 use rustc_hash::FxHashMap;
+use std::io;
 use steel_utils::locks::SyncMutex;
 use uuid::Uuid;
 
@@ -22,9 +23,10 @@ struct MemoryState {
 }
 
 impl MemoryPlayerDataStorage {
-    pub(crate) fn save_domain(&self, domain: &str, player: &Player) {
-        let data = PersistentPlayerData::from_player(player);
+    pub(crate) fn save_domain(&self, domain: &str, player: &Player) -> io::Result<()> {
+        let data = PersistentPlayerData::from_player(player).map_err(io::Error::other)?;
         self.save_domain_data(domain, player.gameprofile.id(), &data);
+        Ok(())
     }
 
     pub(crate) fn save_domain_data(&self, domain: &str, uuid: Uuid, data: &PersistentPlayerData) {

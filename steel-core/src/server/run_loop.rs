@@ -121,7 +121,11 @@ impl Server {
         for player in players {
             let domain = player.get_world().domain().to_owned();
             player.award_custom_stat(&vanilla_custom_stats::LEAVE_GAME);
-            let data = PersistentPlayerData::from_player(&player);
+            let data = player
+                .attachments
+                .detach(&player)
+                .and_then(|()| PersistentPlayerData::from_player(&player));
+            player.attachments.discard();
             player.store_ender_pearls_with_player();
             players_to_save.push((player, domain, data));
         }
@@ -147,6 +151,13 @@ impl Server {
         let mut saved = 0;
         for (player, domain, data) in players_to_save {
             let uuid = player.gameprofile.id();
+            let data = match data {
+                Ok(data) => data,
+                Err(error) => {
+                    log::error!("Failed to snapshot player {uuid} during shutdown: {error}");
+                    continue;
+                }
+            };
             match self
                 .player_data_storage
                 .save_domain_data(&domain, uuid, &data)

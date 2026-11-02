@@ -14,7 +14,11 @@ mod tests;
 
 use std::{io::Cursor, path::PathBuf};
 
-use simdnbt::{ToNbtTag, borrow::read_compound as read_borrowed_compound, owned::NbtTag};
+use simdnbt::{
+    ToNbtTag,
+    borrow::read_compound as read_borrowed_compound,
+    owned::{NbtTag, read_compound as read_owned_compound},
+};
 use tokio::io;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
@@ -28,6 +32,7 @@ use super::player_data::{
 };
 use crate::chunk_saver::PersistentEntity;
 use crate::config::StorageSelection;
+use crate::entity::custom_data::CustomData;
 use crate::level_data::RespawnData;
 use crate::permission::PermissionSubjectIndex;
 #[cfg(test)]
@@ -41,7 +46,7 @@ use steel_utils::{BlockPos, Identifier};
 
 const PLAYER_MAGIC: [u8; 4] = *b"STLP";
 const GLOBAL_MAGIC: [u8; 4] = *b"STLG";
-const PLAYER_STORAGE_VERSION: u16 = 9;
+const PLAYER_STORAGE_VERSION: u16 = 10;
 const GLOBAL_STORAGE_VERSION: u16 = 1;
 const GLOBAL_PLAYER_DATA_VERSION: i32 = 1;
 
@@ -97,6 +102,7 @@ struct PlayerDataFile {
     respawn_config: Option<RespawnConfigFile>,
     ender_pearls: Vec<EnderPearlFile>,
     ender_items: Vec<SlotFile>,
+    custom_data: Vec<u8>,
 }
 
 #[derive(SchemaWrite, SchemaRead)]
@@ -232,15 +238,11 @@ impl PlayerDataStorage {
     /// Saves a player's data for a specific domain.
     pub async fn save_domain(&self, domain: &str, player: &Player) -> io::Result<()> {
         if let Some(storage) = self.temporary_storage(domain)? {
-            storage.save_domain(domain, player);
-            return Ok(());
+            return storage.save_domain(domain, player);
         }
         match &self.backend {
             PlayerDataStorageBackend::File(storage) => storage.save_domain(domain, player).await,
-            PlayerDataStorageBackend::Memory(storage) => {
-                storage.save_domain(domain, player);
-                Ok(())
-            }
+            PlayerDataStorageBackend::Memory(storage) => storage.save_domain(domain, player),
         }
     }
 
@@ -366,6 +368,11 @@ impl PlayerDataFile {
         }
 
         Ok(Self {
+            custom_data: {
+                let mut bytes = Vec::new();
+                data.custom_data.snapshot().write(&mut bytes);
+                bytes
+            },
             data_version: data.data_version,
             pos: data.pos,
             motion: data.motion,
@@ -513,6 +520,13 @@ impl PlayerDataFile {
                 items
             },
             stats: Vec::new(),
+            custom_data: {
+                let compound = read_owned_compound(&mut Cursor::new(self.custom_data.as_slice()))
+                    .map_err(|error| {
+                    io::Error::new(io::ErrorKind::InvalidData, format!("{error:?}"))
+                })?;
+                CustomData::from_compound(compound)
+            },
         })
     }
 }

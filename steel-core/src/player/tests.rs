@@ -1351,7 +1351,8 @@ fn persistent_player_data_restores_independent_experience_fields_and_score() {
     let player = test_player(Arc::clone(test_world()));
     *player.experience.lock() = Experience::from_parts(7, 0.5, 32);
     player.set_score(19);
-    let persistent = PersistentPlayerData::from_player(&player);
+    let persistent =
+        PersistentPlayerData::from_player(&player).expect("player snapshot should succeed");
 
     *player.experience.lock() = Experience::default();
     player.set_score(-1);
@@ -1376,7 +1377,8 @@ fn persistent_player_data_restores_equipment_inventory_slots() {
         inventory.set(EquipmentSlot::Head, helmet.clone());
         inventory.set(EquipmentSlot::Saddle, saddle.clone());
     }
-    let persistent = PersistentPlayerData::from_player(&player);
+    let persistent =
+        PersistentPlayerData::from_player(&player).expect("player snapshot should succeed");
 
     {
         let mut inventory = player.inventory.lock();

@@ -19,6 +19,7 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 
 use crate::chunk::heightmap::HeightmapType;
+use crate::entity::ai::flight::FlightControl;
 use crate::entity::ai::targeting::TargetingConditions;
 use crate::entity::damage::DamageSource;
 use crate::entity::{
@@ -215,10 +216,24 @@ impl BatEntity {
             return;
         };
 
+        self.steer_towards_position(DVec3::new(
+            f64::from(target.x()) + 0.5,
+            f64::from(target.y()) + 0.1,
+            f64::from(target.z()) + 0.5,
+        ));
+
+        if rand::random_range(0..RESTING_SETTLE_CHANCE) == 0
+            && is_redstone_conductor(world, world.get_block_state(above), above)
+        {
+            self.set_resting(true);
+        }
+    }
+
+    fn steer_towards_position(&self, target: DVec3) {
         let position = self.position();
-        let dx = f64::from(target.x()) + 0.5 - position.x;
-        let dy = f64::from(target.y()) + 0.1 - position.y;
-        let dz = f64::from(target.z()) + 0.5 - position.z;
+        let dx = target.x - position.x;
+        let dy = target.y - position.y;
+        let dz = target.z - position.z;
 
         let movement = self.velocity();
         let steer_step = f64::from(STEER_STEP);
@@ -245,12 +260,6 @@ impl BatEntity {
         ));
 
         self.set_rotation((yaw + rot_diff, pitch));
-
-        if rand::random_range(0..RESTING_SETTLE_CHANCE) == 0
-            && is_redstone_conductor(world, world.get_block_state(above), above)
-        {
-            self.set_resting(true);
-        }
     }
 
     /// Picks a random target block around the bat.
@@ -394,8 +403,7 @@ impl LivingEntity for BatEntity {
     }
 
     fn set_health(&self, health: f32) {
-        let max_health = self.get_max_health();
-        let clamped = health.clamp(0.0, max_health);
+        let clamped = self.clamp_health(health);
         self.entity_data
             .lock()
             .living_entity_mut()
@@ -439,6 +447,10 @@ impl Mob for BatEntity {
         false
     }
 
+    fn flight_control(&self) -> Option<&dyn FlightControl> {
+        Some(self)
+    }
+
     fn custom_server_ai_step(&self) {
         let Some(world) = self.level() else {
             return;
@@ -466,6 +478,13 @@ impl Mob for BatEntity {
 
     fn set_mob_flags(&self, flags: i8) {
         self.entity_data.lock().mob_mut().mob_flags.set(flags);
+    }
+}
+
+impl FlightControl for BatEntity {
+    fn fly_towards(&self, target: DVec3) {
+        self.set_resting(false);
+        self.steer_towards_position(target);
     }
 }
 

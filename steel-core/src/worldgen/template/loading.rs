@@ -1,5 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
+use crate::entity::CustomData;
 use rustc_hash::FxHashMap;
 use steel_utils::locks::SyncRwLock;
 
@@ -281,9 +282,11 @@ impl StructureTemplate {
                 silent: entity_nbt.byte("Silent").is_some_and(|value| value != 0),
                 glowing: entity_nbt.byte("Glowing").is_some_and(|value| value != 0),
                 tags: Self::read_entity_tags(&entity_nbt),
-                custom_data: entity_nbt
-                    .compound("data")
-                    .map_or_else(NbtCompound::new, |compound| compound.to_owned()),
+                custom_data: CustomData::from_compound(
+                    entity_nbt
+                        .compound("data")
+                        .map_or_else(NbtCompound::new, |compound| compound.to_owned()),
+                ),
             };
             let mut nbt = entity_nbt.to_owned();
             Self::strip_entity_base_fields(&mut nbt);

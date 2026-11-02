@@ -320,8 +320,7 @@ impl LivingEntity for PigEntity {
     }
 
     fn set_health(&self, health: f32) {
-        let max_health = self.get_max_health();
-        let clamped = health.clamp(0.0, max_health);
+        let clamped = self.clamp_health(health);
         self.entity_data
             .lock()
             .living_entity_mut()

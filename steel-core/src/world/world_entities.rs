@@ -206,7 +206,7 @@ impl World {
     pub(crate) fn detach_player_for_disconnect(
         self: &Arc<Self>,
         player: Arc<Player>,
-    ) -> (Arc<Player>, String, PersistentPlayerData) {
+    ) -> (Arc<Player>, String, Result<PersistentPlayerData, String>) {
         assert_eq!(
             player.remove_all_menus(),
             MenuRemovalStatus::Complete,
@@ -214,11 +214,13 @@ impl World {
         );
 
         player.award_custom_stat(&vanilla_custom_stats::LEAVE_GAME);
+        let recalled = player.attachments.detach(&player);
         let Some(player) = self.take_player_for_removal(&player) else {
             // End credits and failed target admission deliberately have no live
             // world membership but still need one authoritative disconnect save.
             let domain = self.domain().to_owned();
-            let player_data = PersistentPlayerData::from_player(&player);
+            let player_data = recalled.and_then(|()| PersistentPlayerData::from_player(&player));
+            player.attachments.discard();
             player.store_ender_pearls_with_player();
             return (player, domain, player_data);
         };
@@ -226,7 +228,8 @@ impl World {
         if player.is_sleeping() {
             player.stop_sleep_in_bed(true, false);
         }
-        let player_data = PersistentPlayerData::from_player(&player);
+        let player_data = recalled.and_then(|()| PersistentPlayerData::from_player(&player));
+        player.attachments.discard();
 
         self.unride_player_for_removal(&player, true);
         player.store_ender_pearls_with_player();
@@ -302,11 +305,17 @@ impl World {
     pub(crate) fn detach_player_for_domain_switch(
         self: &Arc<Self>,
         player: &Arc<Player>,
-    ) -> Option<(PersistentPlayerData, DomainResidenceToken)> {
-        let player = self.take_player_for_removal(player)?;
+    ) -> Result<Option<(PersistentPlayerData, DomainResidenceToken)>, String> {
+        if !self.contains_player(player) {
+            return Ok(None);
+        }
+        player.attachments.detach(player)?;
+        let Some(player) = self.take_player_for_removal(player) else {
+            return Ok(None);
+        };
 
         player.award_custom_stat(&vanilla_custom_stats::LEAVE_GAME);
-        let player_data = PersistentPlayerData::from_player(&player);
+        let player_data = PersistentPlayerData::from_player(&player)?;
 
         self.unride_player_for_removal(&player, true);
         player.store_ender_pearls_with_player();
@@ -314,7 +323,7 @@ impl World {
         self.entity_tracker().on_player_leave(&player);
         self.player_area_map.on_player_leave(&player);
         let residence_token = player.advance_domain_residence();
-        Some((player_data, residence_token))
+        Ok(Some((player_data, residence_token)))
     }
 
     /// Adds a player to the world.

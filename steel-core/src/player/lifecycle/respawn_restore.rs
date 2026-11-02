@@ -1,6 +1,9 @@
 use std::sync::{Arc, Weak};
 
-use crate::{entity::LivingEntity as _, world::World};
+use crate::{
+    entity::{Entity, LivingEntity as _},
+    world::World,
+};
 
 use super::super::{Abilities, Player, experience::Experience};
 
@@ -11,7 +14,7 @@ impl Player {
     /// membership. Chat continuity belongs to [`super::super::PlayerSession`] and
     /// is therefore shared by both incarnations. For a death replacement,
     /// `transfer_inventory` must be `keepInventory || old spectator`.
-    pub(crate) fn new_respawn_replacement(
+    pub fn new_respawn_replacement(
         self: &Arc<Self>,
         target_world: Arc<World>,
         restore_all: bool,
@@ -49,6 +52,10 @@ impl Player {
         transfer_inventory: bool,
         spawn_block_valid: bool,
     ) {
+        // Steel's domain custom data survives replacement independently of inventory.
+        let custom_data = old_player.data().clone();
+        *self.data() = custom_data;
+        self.attachments.transfer_from(&old_player.attachments);
         let game_mode = old_player.game_mode();
         self.restore_game_modes(game_mode, old_player.previous_game_mode());
         {

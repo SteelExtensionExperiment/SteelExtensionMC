@@ -14,7 +14,7 @@ use steel_utils::{BlockPos, Identifier, UuidExt, WorldAabb, axis::Axis, types::D
 use text_components::TextComponent;
 use uuid::Uuid;
 
-use super::{AddEntityError, ENTITIES, SharedEntity, next_entity_id};
+use super::{AddEntityError, CustomData, ENTITIES, SharedEntity, next_entity_id};
 use crate::entity::entity::{read_nbt_dvec3, read_nbt_rotation, sanitize_nbt_motion};
 use crate::entity::{EntityBaseSaveData, EntityFireFreezeState, EntityLoadRequest};
 use crate::physics::{CollisionWorld, WorldCollisionProvider, collide};
@@ -321,7 +321,8 @@ fn load_entity_save_data(nbt: &BorrowedNbtCompoundView<'_, '_>) -> EntityBaseSav
             .map(|tag| tag.to_str().into_owned())
             .collect::<BTreeSet<_>>();
     }
-    save_data.custom_data = nbt.compound("data").map_or_default(|data| data.to_owned());
+    save_data.custom_data =
+        CustomData::from_compound(nbt.compound("data").map_or_default(|data| data.to_owned()));
     save_data
 }
 

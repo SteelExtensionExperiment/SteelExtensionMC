@@ -393,6 +393,13 @@ impl ChunkStorage {
         // constructing a Chunk. Full construction populates world POI state, so
         // a late validation failure would otherwise leak partial loaded state.
         Self::validate_persistent_chunk(persistent, min_y, height)?;
+        if status != ChunkStatus::Full && !persistent.block_attachments.is_empty() {
+            return Err(Self::invalid_chunk_data(
+                "block attachments require a Full chunk",
+            ));
+        }
+        let block_attachments =
+            Self::block_attachments_from_persistent(persistent, pos, min_y, height)?;
         let sections: Vec<ChunkSection> = persistent
             .sections
             .iter()
@@ -438,6 +445,7 @@ impl ChunkStorage {
                 light,
             );
             let full = FullChunkRef::from_full_context(&chunk);
+            *chunk.block_attachments.lock() = block_attachments;
 
             // Load block entities
             for persistent_be in &persistent.block_entities {

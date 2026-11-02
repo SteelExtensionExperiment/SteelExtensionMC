@@ -579,6 +579,9 @@ impl World {
 
         if runs_normally {
             let _span = tracing::trace_span!("block_events").entered();
+            if let Some(extensions) = self.extensions.get() {
+                extensions.hooks.tick_world_blocks(self, tick_count);
+            }
             self.run_block_events();
         }
 

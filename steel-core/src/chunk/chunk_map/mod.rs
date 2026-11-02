@@ -1255,6 +1255,16 @@ impl ChunkMap {
             .collect()
     }
 
+    /// Includes the block-ticking ring outside entity simulation.
+    pub fn block_ticking_full_chunk_positions(&self) -> Vec<ChunkPos> {
+        self.ticking_chunks
+            .load()
+            .block
+            .iter()
+            .map(|entry| entry.pos)
+            .collect()
+    }
+
     /// Returns whether the chunk is full and currently allows entity ticks.
     pub fn is_entity_ticking_full_chunk_loaded(&self, pos: ChunkPos) -> bool {
         self.chunks

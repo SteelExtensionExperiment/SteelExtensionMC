@@ -809,6 +809,7 @@ mod tests {
         let directory = test_directory("semantic");
         let pos = ChunkPos::new(0, 0);
         let persistent = PersistentChunk {
+            block_attachments: Vec::new(),
             last_modified: 0,
             block_states: Vec::new(),
             biomes: Vec::new(),

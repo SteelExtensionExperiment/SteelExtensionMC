@@ -10,6 +10,7 @@ use steel_core::{
         PermissionGroupConfig, PermissionGroupStore, PermissionGroups, PermissionGroupsConfig,
         PermissionMetadataRuleConfig, PermissionMetadataValue,
     },
+    player::hud::HudPolicy,
 };
 use tokio::fs as async_fs;
 
@@ -56,6 +57,7 @@ fn packaged_configs_parse() {
 fn packaged_config_matches_the_runtime_config_defaults() {
     let config: SteelConfig = toml::from_str(DEFAULT_CONFIG).expect("default config parses");
     let RuntimeConfig {
+        hud,
         max_players,
         view_distance,
         simulation_distance,
@@ -79,6 +81,7 @@ fn packaged_config_matches_the_runtime_config_defaults() {
         chunk_encoding_threads,
     } = config.server.into_runtime_config();
     let defaults = RuntimeConfig::default();
+    assert_eq!(hud, defaults.hud);
 
     assert_eq!(max_players, defaults.max_players);
     assert_eq!(view_distance, defaults.view_distance);
@@ -122,6 +125,28 @@ fn packaged_config_matches_the_runtime_config_defaults() {
     assert_eq!(packet_workers, Some(0));
     assert_eq!(chunk_generation_threads, Some(0));
     assert_eq!(chunk_encoding_threads, Some(0));
+}
+
+#[test]
+fn owner_hud_layout_survives_server_config_loading() {
+    let mut packaged: toml::Table = toml::from_str(DEFAULT_CONFIG).expect("packaged config parses");
+    let mut example: toml::Table = toml::from_str(include_str!(
+        "../../../doc/extensions/examples/combined-hud.toml"
+    ))
+    .expect("HUD example parses");
+    let Some(toml::Value::Table(mut example_server)) = example.remove("server") else {
+        panic!("HUD example must select server settings");
+    };
+    let layout = example_server.remove("hud").expect("HUD layout is present");
+    let expected: HudPolicy = layout.clone().try_into().expect("HUD policy parses");
+    let Some(toml::Value::Table(server)) = packaged.get_mut("server") else {
+        panic!("packaged server config must exist");
+    };
+    server.insert("hud".into(), layout);
+    let config: SteelConfig = toml::Value::Table(packaged)
+        .try_into()
+        .expect("server accepts the owner HUD configuration");
+    assert_eq!(config.server.into_runtime_config().hud, expected);
 }
 
 #[test]

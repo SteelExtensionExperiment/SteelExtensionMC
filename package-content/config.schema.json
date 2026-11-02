@@ -279,6 +279,77 @@
             }
           },
           "additionalProperties": false
+        },
+        "hud": {
+          "type": "object",
+          "description": "Server-owned layout for HUD contributions; works with vanilla clients without resource packs.",
+          "additionalProperties": false,
+          "properties": {
+            "aliases": {
+              "type": "object",
+              "description": "Friendly aliases mapped to namespaced player-data paths.",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "order": {
+              "type": "array",
+              "description": "Source names to show first; remaining sources sort by full key.",
+              "items": {
+                "type": "string"
+              },
+              "uniqueItems": true
+            },
+            "hidden": {
+              "type": "array",
+              "description": "Source names to hide; steel:server hides the default tab information.",
+              "items": {
+                "type": "string"
+              },
+              "uniqueItems": true
+            },
+            "sidebar_title": {
+              "type": "string",
+              "description": "Replacement sidebar title template."
+            },
+            "sidebar_lines": {
+              "type": "array",
+              "description": "Replacement sidebar layout; the rendered sidebar can contain at most 15 lines.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tab_header": {
+              "type": "string",
+              "description": "Replacement tab header template."
+            },
+            "tab_footer": {
+              "type": "string",
+              "description": "Replacement tab footer template."
+            },
+            "boss_bars": {
+              "type": "object",
+              "description": "Overrides keyed by extension:source/local-uuid.",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "hidden": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "Replacement bar title template."
+                  },
+                  "gauge": {
+                    "type": "string",
+                    "description": "Alias or path of a current/maximum compound."
+                  }
+                }
+              }
+            }
+          }
         }
       },
       "required": [

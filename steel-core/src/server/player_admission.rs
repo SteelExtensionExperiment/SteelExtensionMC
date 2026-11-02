@@ -1,3 +1,4 @@
+use std::io;
 use steel_registry::game_profile::GameProfile;
 use steel_utils::translations;
 use text_components::TextComponent;
@@ -19,7 +20,7 @@ pub(super) struct PendingPlayerJoin {
 pub(super) struct PendingPlayerDisconnect {
     player: Arc<Player>,
     domain: String,
-    player_data: Arc<PersistentPlayerData>,
+    player_data: Result<Arc<PersistentPlayerData>, String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -538,7 +539,7 @@ impl Server {
         &self,
         player: Arc<Player>,
         domain: String,
-        player_data: Arc<PersistentPlayerData>,
+        player_data: Result<Arc<PersistentPlayerData>, String>,
         pending_token: PendingWorldChangeToken,
     ) {
         let uuid = player.gameprofile.id();
@@ -631,7 +632,7 @@ impl Server {
         Some(PendingPlayerDisconnect {
             player,
             domain,
-            player_data: Arc::new(player_data),
+            player_data: player_data.map(Arc::new),
         })
     }
 
@@ -644,11 +645,15 @@ impl Server {
         let uuid = player.gameprofile.id();
         let start = Instant::now();
 
-        if let Err(e) = self
-            .player_data_storage
-            .save_domain_data(&domain, uuid, player_data.as_ref())
-            .await
-        {
+        let saved = match player_data {
+            Ok(data) => {
+                self.player_data_storage
+                    .save_domain_data(&domain, uuid, data.as_ref())
+                    .await
+            }
+            Err(error) => Err(io::Error::other(error)),
+        };
+        if let Err(e) = saved {
             log::error!("Failed to save player domain data for {uuid}: {e}");
         }
         if let Err(e) = self

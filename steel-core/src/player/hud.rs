@@ -1,12 +1,13 @@
-//! Per-player HUD: a private sidebar, boss bars and a tab list header/footer override.
-//!
-//! Vanilla drives the sidebar from the shared server scoreboard and boss bars from
-//! `ServerBossEvent` objects that track a set of players. Steel has no server scoreboard yet,
-//! so this module keeps one private sidebar objective per client instead: each line is a
-//! hidden score holder (`#l0`, `#l1`, ...) with a fixed descending score, a blank number format
-//! and the line text as its display name, which is how Paper sidebar libraries render lines.
-//! State lives on the [`PlayerSession`](super::PlayerSession) because the client keeps it
-//! across respawns. Every update sends only what changed.
+//! Per-connection HUD composition using ordinary vanilla packets.
+//! Sources publish independent sections and local boss-bar identities; owner policy
+//! controls the combined display. State survives respawns on `PlayerSession`.
+
+pub mod catalog;
+mod composition;
+mod expression;
+mod ownership;
+
+pub use composition::{BarContribution, BossBarPolicy, HudPolicy, SidebarSection, TabSection};
 
 use rustc_hash::FxHashMap;
 use steel_protocol::packets::game::{
@@ -47,6 +48,7 @@ pub(crate) enum HudPacket {
     Score(CSetScore),
     Reset(CResetScore),
     Boss(CBossEvent),
+    Tab(Box<(TextComponent, TextComponent)>),
 }
 
 #[derive(Debug, Clone)]
@@ -58,23 +60,26 @@ struct Sidebar {
 /// HUD state of one client connection.
 #[derive(Debug, Default)]
 pub struct PlayerHud {
+    rendered_revision: Option<(u64, u64)>,
+    composition: composition::Composition,
     sidebar: Option<Sidebar>,
     boss_bars: FxHashMap<Uuid, BossBar>,
     tab_list: Option<(TextComponent, TextComponent)>,
 }
 
 fn line_owner(index: usize) -> String {
-    format!("#l{index}")
+    // Vanilla hides score holders starting with '#', even with display text.
+    format!("steel:sidebar/{index}")
 }
 
 impl PlayerHud {
-    /// Shows or updates the sidebar; lines past [`MAX_SIDEBAR_LINES`] are dropped.
+    /// Applies a composed sidebar, already validated against the client limit.
     pub(crate) fn set_sidebar(
         &mut self,
         title: TextComponent,
         lines: &[TextComponent],
     ) -> Vec<HudPacket> {
-        let lines = &lines[..lines.len().min(MAX_SIDEBAR_LINES)];
+        debug_assert!(lines.len() <= MAX_SIDEBAR_LINES);
         let mut packets = Vec::new();
         let previous = match self.sidebar.take() {
             None => {
@@ -186,9 +191,12 @@ impl PlayerHud {
         })]
     }
 
-    /// Whether a extension override replaces the server's tab list header and footer.
-    pub(crate) const fn has_tab_list_override(&self) -> bool {
-        self.tab_list.is_some()
+    /// Whether an extension contributes tab content.
+    pub(crate) fn has_tab_list_override(&self) -> bool {
+        self.composition
+            .sources
+            .values()
+            .any(|source| source.tab.is_some())
     }
 }
 
@@ -201,52 +209,23 @@ impl Player {
                 HudPacket::Score(packet) => self.send_packet(packet),
                 HudPacket::Reset(packet) => self.send_packet(packet),
                 HudPacket::Boss(packet) => self.send_packet(packet),
+                HudPacket::Tab(pair) => {
+                    self.send_packet(CTabList::new(&pair.0, &pair.1, self));
+                }
             }
         }
     }
 
-    /// Shows or updates this player's private sidebar (top line first).
-    pub fn set_sidebar(&self, title: TextComponent, lines: &[TextComponent]) {
-        let packets = self.session.hud.lock().set_sidebar(title, lines);
-        self.send_hud(packets);
-    }
-
-    /// Removes this player's sidebar.
-    pub fn clear_sidebar(&self) {
-        let packets = self.session.hud.lock().clear_sidebar();
-        self.send_hud(packets);
-    }
-
-    /// Shows or updates a boss bar; only changed fields are sent.
-    pub fn set_boss_bar(&self, id: Uuid, bar: BossBar) {
-        let packets = self.session.hud.lock().set_boss_bar(id, bar);
-        self.send_hud(packets);
-    }
-
-    /// Removes a boss bar.
-    pub fn remove_boss_bar(&self, id: Uuid) {
-        let packets = self.session.hud.lock().remove_boss_bar(id);
-        self.send_hud(packets);
-    }
-
-    /// Replaces the tab list header and footer for this player, suppressing the server's
-    /// periodic TPS footer until [`Player::clear_tab_list_override`].
-    pub fn set_tab_list_override(&self, header: TextComponent, footer: TextComponent) {
-        self.send_packet(CTabList::new(&header, &footer, self));
-        self.session.hud.lock().tab_list = Some((header, footer));
-    }
-
-    /// Returns the tab list to the server's default; it refreshes on the next broadcast.
-    pub fn clear_tab_list_override(&self) {
-        self.session.hud.lock().tab_list = None;
-    }
-
-    /// Whether a extension override replaces this player's tab list header and footer.
+    /// Whether extensions have published HUD contributions on this connection.
     #[must_use]
     pub fn has_tab_list_override(&self) -> bool {
         self.session.hud.lock().has_tab_list_override()
     }
 }
+
+#[cfg(test)]
+#[path = "hud/tests.rs"]
+mod composition_tests;
 
 #[cfg(test)]
 mod tests {
@@ -276,7 +255,7 @@ mod tests {
         assert!(matches!(
             second.as_slice(),
             [HudPacket::Score(score), HudPacket::Reset(reset)]
-                if score.owner == "#l1" && reset.owner == "#l2"
+                if score.owner == "steel:sidebar/1" && reset.owner == "steel:sidebar/2"
         ));
         assert!(
             hud.set_sidebar(text("Prison"), &[text("a"), text("B")])

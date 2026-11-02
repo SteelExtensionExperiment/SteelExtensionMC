@@ -181,10 +181,10 @@ impl<F: FnOnce() + Send> ServerJob for OnTick<F> {
         JobPoll::Finished
     }
 }
-pub async fn on_tick(
+pub async fn on_tick<T: Send + 'static>(
     server: &Server,
-    work: impl FnOnce() -> Result<(), String> + Send + 'static,
-) -> Result<(), String> {
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
     let (sender, receiver) = oneshot::channel();
     server.jobs.spawn(OnTick(Some(move || {
         let _ = sender.send(work());
@@ -227,9 +227,14 @@ pub fn library(name: &str) -> PathBuf {
         root.join("../extension-example")
             .join(name.replace('_', "-"))
     };
-    crate_dir
-        .join("target/debug")
-        .join(format!("{DLL_PREFIX}{name}{DLL_SUFFIX}"))
+    crate_dir.join("target/debug").join(format!(
+        "{DLL_PREFIX}{}{DLL_SUFFIX}",
+        match name {
+            "creatures" => "steel_creatures_extension",
+            "magic" => "steel_magic_extension",
+            other => other,
+        }
+    ))
 }
 
 pub fn extension_data_root() -> PathBuf {
@@ -340,6 +345,7 @@ pub fn grants(uuid: Uuid, keys: &[&str]) -> Result<PermissionSubjectIndex, Strin
 pub struct Running {
     pub server: Arc<Server>,
     pub player: Arc<Player>,
+    pub sent_packets: Arc<SyncMutex<Vec<EncodedPacket>>>,
     task: JoinHandle<()>,
     _guard: CancelOnDrop,
 }
@@ -378,9 +384,11 @@ pub async fn start(
     .await?;
     server.tick_rate_manager.write().set_tick_rate(200.0);
     let session = Arc::new(PlayerSession::new(10, 10));
+    let peer = PeerConnection::default();
+    let sent_packets = Arc::clone(&peer.sent_packets);
     let player = Arc::new(Player::new(
         GameProfile::new(uuid, name.into(), Vec::new()).map_err(|e| e.to_string())?,
-        Arc::new(PlayerConnection::Other(Box::new(PeerConnection::default()))),
+        Arc::new(PlayerConnection::Other(Box::new(peer))),
         Arc::clone(&session),
         Arc::clone(home),
         Arc::downgrade(&server),
@@ -405,6 +413,7 @@ pub async fn start(
     Ok(Running {
         server,
         player,
+        sent_packets,
         task,
         _guard: guard,
     })

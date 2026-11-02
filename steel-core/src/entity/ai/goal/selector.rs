@@ -75,6 +75,10 @@ impl BitOr for GoalControls {
 }
 
 pub trait Goal: Send {
+    /// One-shot controllers can retire themselves; ordinary reusable goals stay registered.
+    fn is_permanently_finished(&self) -> bool {
+        false
+    }
     fn controls(&self) -> GoalControls;
 
     fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool;
@@ -208,6 +212,13 @@ impl GoalSelector {
     }
 
     pub fn tick(&mut self, mob: &dyn PathfinderMob, entity: &SharedEntity) {
+        for wrapped in &mut self.available_goals {
+            if wrapped.goal().is_permanently_finished() && wrapped.is_running() {
+                wrapped.stop(mob);
+            }
+        }
+        self.available_goals
+            .retain(|wrapped| !wrapped.goal().is_permanently_finished());
         for index in 0..self.available_goals.len() {
             let should_stop = {
                 let disabled_controls = self.disabled_controls;

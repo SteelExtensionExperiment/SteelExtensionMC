@@ -1,3 +1,4 @@
+use crate::player::Player;
 use steel_math::{DEGREE_90, trig};
 use steel_registry::data_components::vanilla_components::{DEATH_PROTECTION, USE_EFFECTS};
 use steel_registry::stat::vanilla_stat_types;
@@ -219,7 +220,7 @@ pub trait LivingEntity: Entity {
         }
     }
 
-    /// Appends vanilla-shaped living state used by command NBT predicates.
+    /// Appends living state in vanilla's persisted NBT shape.
     fn save_command_nbt(&self, nbt: &mut NbtCompound) {
         nbt.insert("Health", self.get_health());
         nbt.insert(
@@ -275,10 +276,10 @@ pub trait LivingEntity: Entity {
                 self.last_hurt_by_player_memory_time(),
             );
         }
-        if let Some(entity) = self.last_hurt_by_mob() {
+        if let Some(uuid) = self.living_base().last_hurt_by_mob_uuid() {
             nbt.insert(
                 "last_hurt_by_mob",
-                NbtTag::IntArray(entity.uuid().to_int_array().to_vec()),
+                NbtTag::IntArray(uuid.to_int_array().to_vec()),
             );
             nbt.insert(
                 "ticks_since_last_hurt_by_mob",
@@ -295,7 +296,16 @@ pub trait LivingEntity: Entity {
     /// Gets the current health of the entity.
     fn get_health(&self) -> f32;
 
-    /// Sets the health of the entity, clamped between 0 and max health.
+    /// Applies an optional owner policy, then the native health bounds.
+    fn clamp_health(&self, health: f32) -> f32 {
+        let health = self
+            .base()
+            .attachment()
+            .map_or(health, |owner| owner.health(health));
+        health.clamp(0.0, self.get_max_health())
+    }
+
+    /// Sets health using [`Self::clamp_health`] before publishing the native health value.
     fn set_health(&self, health: f32);
 
     /// Gets the maximum health from the attribute system.
@@ -557,7 +567,10 @@ pub trait LivingEntity: Entity {
 
     /// Returns the mob that last hurt this entity, if still resolvable.
     fn last_hurt_by_mob(&self) -> Option<SharedEntity> {
-        self.living_base().last_hurt_by_mob()
+        self.living_base().last_hurt_by_mob().or_else(|| {
+            self.level()
+                .and_then(|world| self.living_base().resolve_last_hurt_by_mob(&world))
+        })
     }
 
     /// Returns the tick timestamp this entity was last hurt by a mob.
@@ -682,6 +695,7 @@ pub trait LivingEntity: Entity {
             return Some(amount);
         }
         let mut event = EntityDamageEvent {
+            player_server: self.as_player().map(Player::server),
             world: world.key.clone(),
             victim: EntityInfo::of(self),
             attacker: source
@@ -1083,11 +1097,19 @@ pub trait LivingEntity: Entity {
                         crate::extension::events::EntityDeathEvent {
                             world: world.key.clone(),
                             entity: EntityInfo::of(self),
-                            drop_loot: true,
+                            drop_loot: self
+                                .base()
+                                .attachment()
+                                .is_none_or(|owner| owner.drop_loot()),
                         }
                     })
                 });
-                if drop_loot.is_none_or(|event| event.drop_loot) {
+                if self
+                    .base()
+                    .attachment()
+                    .is_none_or(|owner| owner.drop_loot())
+                    && drop_loot.is_none_or(|event| event.drop_loot)
+                {
                     self.drop_all_death_loot(source);
                 }
                 // TODO: Create wither rose for killer

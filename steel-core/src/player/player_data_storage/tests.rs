@@ -1,4 +1,5 @@
 use crate::entity::DEFAULT_MAX_AIR_SUPPLY;
+use crate::entity::custom_data::DataPath;
 use crate::permission::PermissionSet;
 use crate::player::KnownPlayer;
 use crate::player::player_data::PersistentStat;
@@ -11,6 +12,7 @@ use crate::player::player_data_storage::permissions::{
 };
 use crate::player::player_data_storage::stats::PlayerStatsFile;
 use crate::player::player_data_storage::*;
+use simdnbt::owned::{NbtCompound, NbtTag};
 use std::collections::BTreeMap;
 use std::{
     env,
@@ -30,6 +32,11 @@ fn temp_storage_root(name: &str) -> PathBuf {
 
 fn sample_player_file(data_version: i32) -> PlayerDataFile {
     PlayerDataFile {
+        custom_data: {
+            let mut bytes = Vec::new();
+            NbtCompound::new().write(&mut bytes);
+            bytes
+        },
         data_version,
         pos: [1.0, 2.0, 3.0],
         motion: [0.0, 0.0, 0.0],
@@ -455,6 +462,33 @@ fn player_file_roundtrip_preserves_domain_world_data() {
 }
 
 #[test]
+fn native_and_extension_data_survive_the_binary_player_file() -> io::Result<()> {
+    use crate::entity::custom_data::DataPath;
+    use simdnbt::owned::NbtTag;
+    let mut data = sample_player_file(PLAYER_DATA_VERSION).into_persistent()?;
+    let mut native = NbtCompound::new();
+    native.insert("native_flag", NbtTag::Byte(1));
+    data.custom_data = CustomData::from_compound(native);
+    let mana = DataPath::parse("magic:state/mana/current").map_err(io::Error::other)?;
+    let creature = DataPath::parse("creatures:state/selected").map_err(io::Error::other)?;
+    data.custom_data
+        .set(&mana, NbtTag::Double(31.0))
+        .map_err(io::Error::other)?;
+    data.custom_data
+        .set(&creature, NbtTag::Int(2))
+        .map_err(io::Error::other)?;
+    let file = PlayerDataFile::from_persistent(&data)?;
+    let restored = decode_player_file(&encode_player_file(&file)?)?.into_persistent()?;
+    assert_eq!(
+        restored.custom_data.as_compound().byte("native_flag"),
+        Some(1)
+    );
+    assert_eq!(restored.custom_data.get(&mana), Some(&NbtTag::Double(31.0)));
+    assert_eq!(restored.custom_data.get(&creature), Some(&NbtTag::Int(2)));
+    Ok(())
+}
+
+#[test]
 fn player_file_roundtrip_preserves_absent_previous_game_mode() {
     let mut file = sample_player_file(PLAYER_DATA_VERSION);
     file.prev_game_mode = None;
@@ -703,9 +737,13 @@ fn duplicate_stat_fails_conversion() {
 async fn in_memory_player_data_round_trips_per_domain() {
     let storage = PlayerDataStorage::in_memory();
     let uuid = Uuid::from_u128(7);
-    let data = sample_player_file(PLAYER_DATA_VERSION)
+    let mut data = sample_player_file(PLAYER_DATA_VERSION)
         .into_persistent()
         .expect("player file should convert");
+    let mana = DataPath::parse("magic:state/mana/current").expect("valid path");
+    data.custom_data
+        .set(&mana, NbtTag::Double(25.0))
+        .expect("valid field");
 
     storage
         .save_domain_data("lobby", uuid, &data)
@@ -719,6 +757,7 @@ async fn in_memory_player_data_round_trips_per_domain() {
         .expect("player data should be present");
     assert_eq!(loaded.pos, data.pos);
     assert_eq!(loaded.game_mode, data.game_mode);
+    assert_eq!(loaded.custom_data.get(&mana), Some(&NbtTag::Double(25.0)));
 
     assert!(
         storage
@@ -728,6 +767,25 @@ async fn in_memory_player_data_round_trips_per_domain() {
             .is_none(),
         "domains must not share player data"
     );
+    data.custom_data
+        .set(&mana, NbtTag::Double(80.0))
+        .expect("valid field");
+    storage
+        .save_domain_data("other", uuid, &data)
+        .await
+        .expect("other domain saves");
+    let first = storage
+        .load_domain("lobby", uuid)
+        .await
+        .expect("first loads")
+        .expect("first exists");
+    let second = storage
+        .load_domain("other", uuid)
+        .await
+        .expect("second loads")
+        .expect("second exists");
+    assert_eq!(first.custom_data.get(&mana), Some(&NbtTag::Double(25.0)));
+    assert_eq!(second.custom_data.get(&mana), Some(&NbtTag::Double(80.0)));
     assert!(
         storage
             .load_domain("lobby", Uuid::from_u128(8))

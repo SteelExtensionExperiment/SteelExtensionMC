@@ -1,9 +1,17 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::entity::clamp_loaded_entity_position;
+use crate::entity::{CustomData, clamp_loaded_entity_position};
 
 impl ChunkStorage {
+    /// Snapshots native state independently of the entity's current persistence owner.
+    pub fn owned_entity_to_persistent(entity: &SharedEntity) -> Option<PersistentEntity> {
+        Self::entity_to_persistent(
+            entity,
+            &mut FxHashSet::default(),
+            EntityPersistenceMode::OwnedSnapshot,
+        )
+    }
     pub(super) fn entities_to_persistent(entities: &[SharedEntity]) -> Vec<PersistentEntity> {
         let mut visited = FxHashSet::default();
         entities
@@ -15,7 +23,8 @@ impl ChunkStorage {
             .collect()
     }
 
-    pub(crate) fn entity_tree_to_persistent(entity: &SharedEntity) -> Option<PersistentEntity> {
+    /// Snapshots a chunk-owned entity and its serializable passengers.
+    pub fn entity_tree_to_persistent(entity: &SharedEntity) -> Option<PersistentEntity> {
         let mut visited = FxHashSet::default();
         Self::entity_to_persistent(entity, &mut visited, EntityPersistenceMode::ChunkSave)
     }
@@ -115,7 +124,10 @@ impl ChunkStorage {
                 .take(MAX_ENTITY_TAGS)
                 .cloned()
                 .collect(),
-            custom_data: Self::compound_from_persistent(&persistent.custom_data_nbt, uuid),
+            custom_data: CustomData::from_compound(Self::compound_from_persistent(
+                &persistent.custom_data_nbt,
+                uuid,
+            )),
         }
     }
 
@@ -160,6 +172,9 @@ impl ChunkStorage {
 
         let mut nbt = NbtCompound::new();
         entity.save_additional(&mut nbt);
+        if let Some(living) = entity.as_living_entity() {
+            living.save_command_nbt(&mut nbt);
+        }
         let mut nbt_bytes = Vec::new();
         nbt.write(&mut nbt_bytes);
 
@@ -191,7 +206,7 @@ impl ChunkStorage {
             silent: save_data.silent,
             glowing: save_data.glowing,
             tags: save_data.tags.iter().cloned().collect(),
-            custom_data_nbt: Self::compound_to_persistent(&save_data.custom_data),
+            custom_data_nbt: Self::compound_to_persistent(save_data.custom_data.as_compound()),
             nbt_data: nbt_bytes,
             passengers,
         })
@@ -207,8 +222,18 @@ impl ChunkStorage {
 
     pub(super) fn entity_should_persist(entity: &dyn Entity, mode: EntityPersistenceMode) -> bool {
         match mode {
-            EntityPersistenceMode::ChunkSave => Self::entity_should_save(entity),
+            EntityPersistenceMode::ChunkSave => {
+                entity.is_persistent()
+                    && entity
+                        .base()
+                        .attachment()
+                        .is_none_or(|owner| owner.save_in_chunk())
+                    && Self::entity_should_save(entity)
+            }
             EntityPersistenceMode::DimensionTransition => !entity.is_removed(),
+            EntityPersistenceMode::OwnedSnapshot => {
+                entity.is_persistent() && entity.entity_type().can_serialize
+            }
         }
     }
 
@@ -327,7 +352,7 @@ impl ChunkStorage {
     }
 
     /// Converts one persistent entity to runtime format without loading passengers.
-    pub(super) fn persistent_to_entity_at_level(
+    pub fn persistent_to_entity_at_level(
         persistent: &PersistentEntity,
         chunk_pos: ChunkPos,
         level: &Weak<World>,
