@@ -179,6 +179,16 @@ impl StatTypeEntry {
                 .by_id(id)
                 .is_some_and(|block| crate::REGISTRY.client_content.is_vanilla_block(block));
         }
+        if let Some(registry) = self
+            .registry
+            .downcast_ref::<crate::entity_type::EntityTypeRegistry>()
+        {
+            return registry.by_id(id).is_some_and(|entity_type| {
+                crate::REGISTRY
+                    .client_content
+                    .is_vanilla_entity_type(entity_type)
+            });
+        }
         true
     }
 

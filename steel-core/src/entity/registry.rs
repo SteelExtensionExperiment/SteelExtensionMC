@@ -1,7 +1,7 @@
 //! Entity registry for creating entity instances.
 
 use std::ops::Deref;
-use std::sync::{OnceLock, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 
 use glam::DVec3;
 use rand::Rng;
@@ -14,6 +14,7 @@ use steel_registry::{REGISTRY, RegistryEntry};
 use steel_utils::BlockPos;
 use uuid::Uuid;
 
+use super::entities::mobs::extension::{ExtensionMob, init_mob_hooks};
 use super::generated_entities::{register_entity_factories, register_spawn_rules};
 use super::{
     EntityBaseLoad, EntityBaseSaveData, EntityFireFreezeState, EntitySpawnReason, SharedEntity,
@@ -306,6 +307,15 @@ pub fn init_entities() {
         let mut registry = EntityRegistry::new();
         register_entity_factories(&mut registry);
         register_spawn_rules(&mut registry);
+        for entry in REGISTRY.client_content.entities() {
+            registry.register(entry.entity_type, |entity_type, id, position, world| {
+                Arc::new(ExtensionMob::new(entity_type, id, position, world))
+            });
+            registry.register_load(entry.entity_type, |entity_type, load| {
+                Arc::new(ExtensionMob::from_saved(entity_type, load))
+            });
+        }
+        init_mob_hooks();
         registry
     });
 }
