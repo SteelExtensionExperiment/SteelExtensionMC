@@ -7,8 +7,10 @@
 mod bed;
 mod biome;
 mod definition;
+mod entity;
 mod fluid;
 pub use biome::{ClientBiomes, TintVariant};
+pub use entity::{ClientEntity, EntityRegistration, MobCarrier, MobStyle};
 pub use fluid::{ClientFluid, FluidRegistration, FluidSpread, FluidTint};
 mod horizontal;
 pub use horizontal::{ClientHorizontal, HorizontalPlacement};
@@ -30,8 +32,8 @@ use rustc_hash::FxHashMap;
 use steel_utils::BlockStateId;
 
 use crate::{
-    REGISTRY, RegistryEntry, blocks::BlockRef, fluid::FluidRef, item_stack::ItemStack,
-    items::ItemRef,
+    REGISTRY, RegistryEntry, blocks::BlockRef, entity_type::EntityTypeRef, fluid::FluidRef,
+    item_stack::ItemStack, items::ItemRef,
 };
 
 /// A stationary display relative to the placed block's minimum corner.
@@ -103,6 +105,8 @@ pub struct ClientContent {
     fluids: FxHashMap<usize, &'static ClientFluid>,
     /// Each registered pair once, in registration order.
     fluid_entries: Vec<&'static ClientFluid>,
+    /// Registered mob types, in registration order.
+    entities: Vec<&'static ClientEntity>,
     tinting_fluid_count: u16,
     biomes: ClientBiomes,
     vanilla_item_count: usize,
@@ -219,11 +223,44 @@ impl ClientContent {
             .and_then(|entry| entry.tint_index)
     }
 
+    /// The registered mob type behind an entity type, if it is one.
+    #[must_use]
+    pub fn entity(&self, entity_type: EntityTypeRef) -> Option<&'static ClientEntity> {
+        self.entities
+            .iter()
+            .find(|entry| std::ptr::eq(entry.entity_type, entity_type))
+            .copied()
+    }
+
+    /// Every registered mob type, in registration order.
+    #[must_use]
+    pub fn entities(&self) -> &[&'static ClientEntity] {
+        &self.entities
+    }
+
+    /// Vanilla entity types are the only ones clients know.
+    #[must_use]
+    pub fn is_vanilla_entity_type(&self, entity_type: EntityTypeRef) -> bool {
+        self.entity(entity_type).is_none()
+    }
+
     /// The number of registered fluids that tint water.
     #[must_use]
     pub const fn tinting_fluid_count(&self) -> u16 {
         self.tinting_fluid_count
     }
+}
+
+/// The vanilla entity type clients see for an entity type.
+#[must_use]
+pub fn client_entity_type(entity_type: EntityTypeRef) -> EntityTypeRef {
+    if !REGISTRY.is_initialized() {
+        return entity_type;
+    }
+    REGISTRY
+        .client_content
+        .entity(entity_type)
+        .map_or(entity_type, |entry| entry.carrier.entity_type())
 }
 
 /// The vanilla fluid clients see for a fluid. Vanilla fluids are returned unchanged.

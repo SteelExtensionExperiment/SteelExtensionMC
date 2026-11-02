@@ -1335,6 +1335,18 @@ pub trait Mob: LivingEntity + Leashable {
     /// the target was hurt.
     #[must_use]
     fn do_hurt_target(&self, entity: &SharedEntity, world: &World, target: &SharedEntity) -> bool {
+        self.vanilla_do_hurt_target(entity, world, target)
+    }
+
+    /// Vanilla `Mob.doHurtTarget`, callable by mobs that override
+    /// [`Mob::do_hurt_target`] to react to their hits.
+    #[must_use]
+    fn vanilla_do_hurt_target(
+        &self,
+        entity: &SharedEntity,
+        world: &World,
+        target: &SharedEntity,
+    ) -> bool {
         let Some(attacker) = self.as_entity_event_source().as_living_entity() else {
             return false;
         };
@@ -1672,6 +1684,12 @@ pub trait Mob: LivingEntity + Leashable {
     }
 
     fn tick_move_control(&self) {
+        self.tick_vanilla_move_control();
+    }
+
+    /// Vanilla `MoveControl.tick`, callable by mobs that override
+    /// [`Mob::tick_move_control`] for some of their states.
+    fn tick_vanilla_move_control(&self) {
         let move_control = {
             let mut controls = self.mob_base().controls().lock();
             let move_control = controls.move_control;

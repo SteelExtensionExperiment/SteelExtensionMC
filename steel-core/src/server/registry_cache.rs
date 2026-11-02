@@ -164,7 +164,9 @@ impl RegistryCache {
         add_tags!(DIALOG_REGISTRY, dialogs);
         add_tags!(DAMAGE_TYPE_REGISTRY, damage_types);
         add_tags!(BANNER_PATTERN_REGISTRY, banner_patterns);
-        add_tags!(ENTITY_TYPE_REGISTRY, entity_types);
+        add_tags!(ENTITY_TYPE_REGISTRY, entity_types, |entity_type| registry
+            .client_content
+            .is_vanilla_entity_type(entity_type));
         add_tags!(INSTRUMENT_REGISTRY, instruments);
         add_tags!(PAINTING_VARIANT_REGISTRY, painting_variants);
         add_tags!(ENCHANTMENT_REGISTRY, enchantments);
