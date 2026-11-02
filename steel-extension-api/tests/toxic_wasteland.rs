@@ -128,6 +128,30 @@ fn check_registration() -> Result<&'static ClientFluid, Box<dyn Error>> {
     assert_eq!(client_fluid(sludge.flowing), &vanilla_fluids::FLOWING_WATER);
     assert!(!REGISTRY.client_content.is_vanilla_fluid(sludge.source));
 
+    // The nuclear blocks are full cubes whose clients see a vanilla carrier plus a head model,
+    // and they drop themselves.
+    for key in ["uranium_ore", "nuclear_waste"] {
+        let key = Identifier::new_static("toxic_wasteland", key);
+        let block = REGISTRY
+            .blocks
+            .by_key(&key)
+            .ok_or("nuclear block missing")?;
+        let client = REGISTRY
+            .client_content
+            .block(block)
+            .ok_or("nuclear block has no client representation")?;
+        assert!(
+            REGISTRY.client_content.is_vanilla_block(
+                REGISTRY
+                    .blocks
+                    .by_state_id(client_block_state(block.default_state()))
+                    .ok_or("carrier state missing")?
+            )
+        );
+        assert_eq!(client.displays_for(block.default_state()).len(), 1, "{key}");
+        assert!(client.self_drop.is_some(), "{key} must drop itself");
+    }
+
     // One green variant per server biome follows the server biomes.
     let table = REGISTRY.client_content.client_biomes();
     assert_eq!(table.client_count(), table.server_count() * 2);

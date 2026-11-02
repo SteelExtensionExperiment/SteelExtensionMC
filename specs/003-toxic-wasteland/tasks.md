@@ -195,6 +195,19 @@ reaction.
 - T045 (parity): Steel's existing chunk and registry encoding tests pass unchanged. Without a tinting fluid, sections write their biomes unchanged and the client biome count equals the server count. A dedicated byte-comparison test was not added.
 - Not verified: a session with a real client (colors in game, swimming without corrections). The quickstart's manual steps cover it.
 
+## Phase 10: Bonus - wasteland decorations (requested after the main phases)
+
+- [x] T046 [US5] Register two custom blocks with player-head models (no resource pack), each dropping itself: `toxic_wasteland:uranium_ore` (mined like stone) and `toxic_wasteland:nuclear_waste` (mined like iron), in `extension-example/toxic-wasteland/src/model.rs` and `src/content.rs`. The skins come from minecraft-heads.com (Uranium Ore `f96a322e`, Nuclear Waste `3ee3a969`).
+- [x] T047 [US5] Add seeded, chunk-contained decorations in `src/features.rs`, merged into the terrain batch by `src/generator.rs`:
+  - dead trees: a leaning pale-oak trunk, two or three crooked branches, roots, and hanging moss
+  - surface uranium patches
+  - one to three barrels on each sludge lake's rim
+
+  New config keys: `world.tree_chance` and `world.uranium_chance`.
+- [x] T048 [US5] Add unit tests for chunk containment, trees on dry ground, exposed uranium, barrels on lake rims, determinism, and at most 16 display blocks per chunk. The native test checks both blocks' carrier, model, and self-drop.
+
+Custom entities were considered and deferred. The extension API has no entity type registration yet: a mob shown to vanilla clients as a vanilla mob, with its own saved identity, spawning, and extension-defined AI goals, is a platform foundation the size of the custom fluids and should be its own iteration.
+
 ## Dependencies & execution order
 
 - **Setup** (T001–T002) → **Foundational** (T003–T017) → the stories.
