@@ -145,12 +145,6 @@ impl FluidBehavior for ExtensionFluid {
         }
     }
 
-    fn react_with_neighbors(&self, world: &Arc<World>, pos: BlockPos) -> bool {
-        self.hooks
-            .as_ref()
-            .is_none_or(|hooks| hooks.react_with_neighbors(world, pos, world.get_block_state(pos)))
-    }
-
     fn tick(
         &self,
         world: &Arc<World>,

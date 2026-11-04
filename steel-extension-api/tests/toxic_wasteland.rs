@@ -430,9 +430,11 @@ fn check_random_tick_rates(world: &Arc<World>, sludge: &ClientFluid) {
     clear(world);
 }
 
+/// Places sludge beside lava through normal block placement, so the reaction runs
+/// from `LiquidBlock::on_place` through the flow listener.
 fn check_lava(world: &Arc<World>, sludge: &ClientFluid) {
     let pos = BlockPos::new(3, FLOOR_Y + 1, 12);
-    let behavior = FLUID_BEHAVIORS.get_behavior(sludge.source);
+    let air = vanilla_blocks::AIR.default_state();
     for (level, cooled) in [
         (0, &vanilla_blocks::COARSE_DIRT),
         (2, &vanilla_blocks::COBBLESTONE),
@@ -440,20 +442,18 @@ fn check_lava(world: &Arc<World>, sludge: &ClientFluid) {
         let lava = vanilla_blocks::LAVA
             .default_state()
             .set_value(&BlockStateProperties::LEVEL, level);
-        world.set_block(
-            pos,
-            sludge.block.default_state(),
-            UpdateFlags::UPDATE_CLIENTS,
-        );
+        world.set_block(pos, air, UpdateFlags::UPDATE_CLIENTS);
         world.set_block(pos.offset(1, 0, 0), lava, UpdateFlags::UPDATE_CLIENTS);
-        assert!(
-            behavior.react_with_neighbors(world, pos),
-            "sludge itself keeps spreading"
-        );
+        world.set_block(pos, sludge.block.default_state(), UpdateFlags::UPDATE_ALL);
         assert_eq!(
             world.get_block_state(pos.offset(1, 0, 0)).get_block(),
             cooled,
             "lava level {level}"
+        );
+        assert_eq!(
+            world.get_block_state(pos).get_block(),
+            sludge.block,
+            "sludge itself stays"
         );
     }
     clear(world);

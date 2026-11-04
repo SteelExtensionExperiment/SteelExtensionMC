@@ -18,6 +18,7 @@ use steel_utils::BlockPos;
 use steel_utils::BlockStateId;
 use steel_utils::types::UpdateFlags;
 
+use steel_registry::level_events;
 use steel_registry::sound_events;
 use steel_registry::vanilla_items;
 
@@ -25,7 +26,7 @@ use crate::behavior::FLUID_BEHAVIORS;
 use crate::behavior::block::{BlockBehavior, PickupResult};
 use crate::behavior::context::BlockPlaceContext;
 use crate::entity::ai::path::PathComputationType;
-use crate::fluid::is_lava_fluid;
+use crate::fluid::{FluidStateExt, is_lava_fluid};
 use crate::player::Player;
 use crate::world::{ConditionalBlockSetResult, ScheduledTickAccess, World};
 
@@ -53,16 +54,66 @@ impl LiquidBlock {
         Self { block, fluid }
     }
 
-    /// Checks if this liquid should spread, letting its fluid react with neighbors first.
+    /// Checks if this liquid should spread and handles lava-water interactions.
     /// Based on vanilla's `LiquidBlock.shouldSpreadLiquid()`.
     ///
-    /// Returns `true` if the liquid should spread (schedule tick), or `false` if the
-    /// fluid converted its block. Vanilla hardcodes the lava reactions here; they live
-    /// in [`FluidBehavior::react_with_neighbors`] so that registered fluids can react too.
+    /// Returns `true` if the liquid should spread (schedule tick),
+    /// Returns `false` if the liquid was converted to a block (obsidian/cobblestone/basalt).
+    ///
+    /// Unlike vanilla, flow listeners run first (see
+    /// [`FluidBehaviorRegistry::allow_flow`](crate::behavior::FluidBehaviorRegistry::allow_flow)),
+    /// as Fabric's `FluidFlowEvents.ALLOW` does at the head of this method.
     fn should_spread_liquid(&self, world: &Arc<World>, pos: BlockPos) -> bool {
-        FLUID_BEHAVIORS
-            .get_behavior(self.fluid)
-            .react_with_neighbors(world, pos)
+        if !FLUID_BEHAVIORS.allow_flow(world, pos, world.get_block_state(pos).get_fluid_state()) {
+            return false;
+        }
+        // Only lava has special interactions with water and blue ice
+        if !is_lava_fluid(self.fluid) {
+            return true;
+        }
+        // Check if there's soul soil below (for basalt generation)
+        let below_pos = pos.offset(0, -1, 0);
+        let below_state = world.get_block_state(below_pos);
+        let has_soul_soil_below = below_state.get_block() == &vanilla_blocks::SOUL_SOIL;
+
+        // Get fluid state to check if this is a source
+        let fluid_state = world.get_block_state(pos).get_fluid_state();
+
+        for direction in Direction::FLOW_NEIGHBOR_CHECK {
+            let neighbor_pos = direction.relative(pos);
+            let neighbor_fluid = world.get_block_state(neighbor_pos).get_fluid_state();
+
+            // Check for water (including flowing_water and waterlogged blocks)
+            // Using fluid tag check to support modded fluids registered in the water tag
+            if neighbor_fluid.is_water() {
+                // Lava + Water = Obsidian (if source) or Cobblestone (if flowing)
+                let new_block = if fluid_state.is_source() {
+                    &vanilla_blocks::OBSIDIAN
+                } else {
+                    &vanilla_blocks::COBBLESTONE
+                };
+
+                let new_state = REGISTRY.blocks.get_default_state_id(new_block);
+                world.set_block(pos, new_state, UpdateFlags::UPDATE_ALL);
+                world.level_event(level_events::LAVA_FIZZ, pos, 0, None);
+                return false; // Don't schedule fluid tick - block was converted
+            }
+
+            // Check for basalt generation: soul soil below + blue ice adjacent
+            if has_soul_soil_below {
+                let neighbor_state = world.get_block_state(neighbor_pos);
+                if neighbor_state.get_block() == &vanilla_blocks::BLUE_ICE {
+                    let new_state = REGISTRY
+                        .blocks
+                        .get_default_state_id(&vanilla_blocks::BASALT);
+                    world.set_block(pos, new_state, UpdateFlags::UPDATE_ALL);
+                    world.level_event(level_events::LAVA_FIZZ, pos, 0, None);
+                    return false; // Don't schedule fluid tick - block was converted
+                }
+            }
+        }
+
+        true // No interaction occurred, proceed with normal fluid tick
     }
 
     fn should_bubble_column_occupy(state: BlockStateId) -> bool {
