@@ -96,6 +96,7 @@ struct PlayerDataFile {
     experience_level: i32,
     experience_progress: f32,
     experience_total: i32,
+    enchantment_seed: i32,
     score: i32,
     seen_credits: bool,
     root_vehicle: Option<RootVehicleFile>,
@@ -406,6 +407,7 @@ impl PlayerDataFile {
             experience_level: data.experience_level,
             experience_progress: data.experience_progress,
             experience_total: data.experience_total,
+            enchantment_seed: data.enchantment_seed,
             score: data.score,
             seen_credits: data.seen_credits,
             root_vehicle: data
@@ -491,6 +493,7 @@ impl PlayerDataFile {
             experience_level: self.experience_level,
             experience_progress: self.experience_progress,
             experience_total: self.experience_total,
+            enchantment_seed: self.enchantment_seed,
             score: self.score,
             seen_credits: self.seen_credits,
             root_vehicle: self.root_vehicle.map(|root_vehicle| PersistentRootVehicle {
@@ -527,6 +530,7 @@ impl PlayerDataFile {
                 })?;
                 CustomData::from_compound(compound)
             },
+            advancements: Vec::new(),
         })
     }
 }

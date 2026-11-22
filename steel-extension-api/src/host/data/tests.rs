@@ -12,7 +12,7 @@ use stabby::{abi::IDeterminantProvider, string::String as ApiString};
 use steel_core::{
     bootstrap::init_globals,
     chunk_saver::{ChunkStorage, PersistentEntity},
-    entity::{ENTITIES, Entity, LivingEntity, RemovalReason, next_entity_id},
+    entity::{ENTITIES, Entity, LivingEntity, RemovalReason},
     player::player_data::PersistentPlayerData,
 };
 use steel_registry::vanilla_entities;
@@ -48,7 +48,6 @@ fn live_entity_data_merges_preserves_native_fields_and_rejects_stale_targets() -
     let entity = ENTITIES
         .create(
             &vanilla_entities::COW,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, 8.5),
             Arc::downgrade(world),
         )
@@ -84,7 +83,6 @@ fn custom_data_survives_native_entity_save_load_and_conversion() -> Result<(), S
     let entity = ENTITIES
         .create(
             &vanilla_entities::COW,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, 8.5),
             Arc::downgrade(world),
         )

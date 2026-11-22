@@ -7,6 +7,7 @@ use crate::{
     },
     config::WorldStorageConfig,
     level_data::{GameTimeSource, RespawnData, WorldGenerationSettings},
+    loot::random_sequences::RandomSequences,
     world::{World, WorldConfig},
     worldgen::generator::registry::ValidatedWorldGeneratorConfig,
 };
@@ -41,6 +42,7 @@ impl PreparedWorld {
         request: TemporaryWorldRequest,
         validated: ValidatedWorldGeneratorConfig,
         game_time_source: GameTimeSource,
+        random_sequences: Arc<RandomSequences>,
     ) -> Result<Self, String> {
         let output = server.world_generators.create(
             None,
@@ -81,15 +83,10 @@ impl PreparedWorld {
         )
         .await
         .map_err(|e| e.to_string())?;
-        let center = ChunkPos::from_block_pos(request.spawn);
-        let ticket =
-            world
-                .chunk_map
-                .request_square(center, 1, ChunkStatus::Full, ChunkTicketKind::Pregen);
-        let prepared = PreparedWorld {
+        let mut prepared = PreparedWorld {
             world,
             published: false,
-            spawn_ticket: Some(ticket),
+            spawn_ticket: None,
             cleanup: server.temporary_worlds.cleanup.clone(),
         };
         let world = &prepared.world;
@@ -97,6 +94,7 @@ impl PreparedWorld {
             .extensions
             .set(Arc::clone(&server.extensions))
             .map_err(|_| "world extensions already set")?;
+        *world.random_sequences.write() = Some(random_sequences);
         {
             let mut data = world.level_data.write();
             data.data_mut().set_spawn_pos(request.spawn);
@@ -110,6 +108,12 @@ impl PreparedWorld {
         }
         // Prepare the authored spawn before anyone can enter the world.
         let chunk = ChunkPos::from_block_pos(request.spawn);
+        prepared.spawn_ticket = Some(world.chunk_map.request_square(
+            chunk,
+            1,
+            ChunkStatus::Full,
+            ChunkTicketKind::Pregen,
+        ));
         world
             .chunk_map
             .with_full_chunks_in_radius(chunk, 1, || ())

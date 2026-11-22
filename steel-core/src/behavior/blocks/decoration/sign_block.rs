@@ -6,6 +6,7 @@ use std::cmp::Ordering;
 use std::sync::{Arc, Weak};
 
 use steel_macros::block_behavior;
+use steel_math::trig;
 use steel_math::{
     DEGREE_90, DEGREE_180, RAD_TO_DEG_F64, convert_to_rotation_segment, wrap_degrees,
 };
@@ -94,7 +95,7 @@ pub fn facing_text_slot(state: BlockStateId, pos: BlockPos, player: &Player) -> 
     let dz = player_pos.z - (f64::from(pos.0.z) + 0.5);
 
     // Calculate angle from sign to player (in degrees, -90 to account for Minecraft's coordinate system)
-    let player_angle = (dz.atan2(dx) * RAD_TO_DEG_F64) as f32 - DEGREE_90;
+    let player_angle = (trig::atan2(dz, dx) * RAD_TO_DEG_F64) as f32 - DEGREE_90;
 
     // Front text if the angle difference is <= 90 degrees
     if wrap_degrees(player_angle - sign_y_rot).abs() <= DEGREE_90 {
@@ -123,7 +124,7 @@ fn get_sign_rotation_degrees(state: BlockStateId) -> f32 {
 ///
 /// Vanilla uses `isSolid()` which checks if the collision shape is a full cube.
 /// This means signs cannot be placed on other signs, fences, walls, etc.
-fn can_support_standing_sign(world: &dyn LevelReader, pos: BlockPos) -> bool {
+fn can_support_standing_sign(world: &(impl LevelReader + ?Sized), pos: BlockPos) -> bool {
     let below_pos = BlockPos::new(pos.x(), pos.y() - 1, pos.z());
     let below_state = world.get_block_state(below_pos);
     below_state.is_solid()
@@ -133,7 +134,11 @@ fn can_support_standing_sign(world: &dyn LevelReader, pos: BlockPos) -> bool {
 ///
 /// Vanilla uses `isSolid()` which allows wall signs to be placed on other signs
 /// (since signs have `forceSolidOn`).
-fn can_wall_sign_survive(world: &dyn LevelReader, pos: BlockPos, facing: Direction) -> bool {
+fn can_wall_sign_survive(
+    world: &(impl LevelReader + ?Sized),
+    pos: BlockPos,
+    facing: Direction,
+) -> bool {
     // Wall sign needs a solid block behind it
     let behind_pos = facing.opposite().relative(pos);
     let behind_state = world.get_block_state(behind_pos);
@@ -141,7 +146,7 @@ fn can_wall_sign_survive(world: &dyn LevelReader, pos: BlockPos, facing: Directi
 }
 
 /// Checks if a ceiling hanging sign can survive at the given position.
-fn can_ceiling_hanging_sign_survive(world: &dyn LevelReader, pos: BlockPos) -> bool {
+fn can_ceiling_hanging_sign_survive(world: &(impl LevelReader + ?Sized), pos: BlockPos) -> bool {
     let above_pos = BlockPos::new(pos.x(), pos.y() + 1, pos.z());
     let above_state = world.get_block_state(above_pos);
     world.is_face_sturdy_for(above_state, above_pos, Direction::Down, SupportType::Center)
@@ -153,7 +158,7 @@ fn can_ceiling_hanging_sign_survive(world: &dyn LevelReader, pos: BlockPos) -> b
 /// 1. If the neighbor is a wall hanging sign on the same axis, allow attachment
 /// 2. Otherwise, check if the face is sturdy with FULL support type
 fn can_attach_to(
-    world: &dyn LevelReader,
+    world: &(impl LevelReader + ?Sized),
     sign_facing: Direction,
     attach_pos: BlockPos,
     attach_face: Direction,
@@ -180,7 +185,7 @@ fn can_attach_to(
 /// Wall hanging signs need support on at least one side perpendicular to facing.
 /// This matches vanilla's `WallHangingSignBlock.canPlace`.
 fn can_wall_hanging_sign_survive(
-    world: &dyn LevelReader,
+    world: &(impl LevelReader + ?Sized),
     pos: BlockPos,
     facing: Direction,
 ) -> bool {

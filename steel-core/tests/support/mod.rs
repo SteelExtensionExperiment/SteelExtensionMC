@@ -31,6 +31,7 @@ use crate::chunk::chunk_holder::ChunkHolder;
 pub(crate) use crate::chunk::test_support::insert_full_chunk;
 use crate::entity::{Entity, EntityBase, SharedEntity};
 use crate::level_data::{GameTimeSource, WorldGenerationSettings};
+use crate::player::Player;
 use crate::world::game_event::GameEventContext;
 use crate::world::{
     LevelAccessor, LevelReader, ScheduledTickAccess, World, WorldConfig, WorldStorageConfig,
@@ -281,6 +282,8 @@ pub(crate) fn create_test_world_with_damage_history(
     game_time_source: GameTimeSource,
     history: &Arc<DamageHistory>,
 ) -> Arc<World> {
+    use crate::loot::random_sequences::RandomSequences;
+
     init_vanilla_registry();
     let resources = test_world_resources();
     let generator = Arc::new(ChunkGeneratorType::Empty(EmptyChunkGenerator::new()));
@@ -300,7 +303,7 @@ pub(crate) fn create_test_world_with_damage_history(
         OverworldNoiseSettings::SEA_LEVEL
     };
 
-    resources
+    let world = resources
         .runtime
         .block_on(World::new_with_config(
             Arc::clone(&resources.runtime),
@@ -325,7 +328,13 @@ pub(crate) fn create_test_world_with_damage_history(
             },
             Arc::clone(&resources.generation_pool),
         ))
-        .expect("test world should initialize")
+        .expect("test world should initialize");
+    // Standalone fixtures own their streams; domain fixtures rebind through
+    // DomainRandomSequences::load, just as the server does.
+    *world.random_sequences.write() = Some(Arc::new(RandomSequences::new_for_test(
+        world.level_data.read().seed(),
+    )));
+    world
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -627,4 +636,23 @@ pub(crate) fn fresh_test_derived_world(primary: &Arc<World>, name: &'static str)
         primary.dimension_type,
         GameTimeSource::Derived(Arc::clone(&primary.game_time)),
     )
+}
+
+/// Uses the block at `pos` with an empty main hand, clicking its top face center.
+pub(crate) fn use_block(world: &Arc<World>, pos: BlockPos, player: &Player) {
+    use crate::behavior::{BLOCK_BEHAVIORS, BlockHitResult, InventoryAccess};
+    use steel_utils::{Direction, types::InteractionHand};
+    let state = world.get_block_state(pos);
+    let hit = BlockHitResult {
+        location: pos.get_center(),
+        direction: Direction::Up,
+        block_pos: pos,
+        miss: false,
+        inside: false,
+        world_border_hit: false,
+    };
+    let mut inv = InventoryAccess::new(Arc::clone(&player.inventory), InteractionHand::MainHand);
+    BLOCK_BEHAVIORS
+        .get_behavior(state.get_block())
+        .use_without_item(state, world, pos, player, &hit, &mut inv);
 }

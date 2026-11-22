@@ -1,13 +1,26 @@
+use std::f32::consts::PI;
+
+use crate::loot::{LOOT_TABLES, LootResult};
 use crate::player::Player;
-use steel_math::{DEGREE_90, trig};
-use steel_registry::data_components::vanilla_components::{DEATH_PROTECTION, USE_EFFECTS};
+use steel_math::{DEGREE_90, RAD_TO_DEG_F64, round_f32, trig};
+use steel_registry::data_components::vanilla_components::{
+    BLOCKS_ATTACKS, DEATH_PROTECTION, USE_EFFECTS,
+};
+use steel_registry::entity_variant::MooshroomVariant;
 use steel_registry::stat::vanilla_stat_types;
 use steel_registry::{DyeColor, vanilla_custom_stats};
+use steel_utils::TICKS_PER_SECOND;
+use text_components::TextComponent;
 
+use super::entity::compute_modified_friction;
 use super::*;
-use crate::behavior::{BLOCK_BEHAVIORS, InventoryTickContext, MOB_EFFECT_BEHAVIORS};
+use crate::behavior::{
+    BLOCK_BEHAVIORS, ITEM_BEHAVIORS, InventoryTickContext, MOB_EFFECT_BEHAVIORS,
+};
+use crate::entity::blocks_attacks;
 use crate::entity::consume_effect::apply_consume_effect;
-use crate::entity::damage::RecentDamageSource;
+use crate::entity::damage::{FallLocation, RecentDamageSource, death_message};
+use crate::entity::pushing::EntityPush;
 use crate::extension::events::{EntityDamageEvent, EntityInfo};
 
 const BED_SLEEP_POSITION_OFFSET: f64 = 0.125;
@@ -362,6 +375,11 @@ pub trait LivingEntity: Entity {
     ///
     /// Mirrors `Chicken.get(DataComponents.CHICKEN_VARIANT)` for the loot predicate.
     fn chicken_loot_variant(&self) -> Option<&Identifier> {
+        None
+    }
+
+    /// Returns the mooshroom variant component for entity loot predicates.
+    fn mooshroom_loot_variant(&self) -> Option<MooshroomVariant> {
         None
     }
 
@@ -748,7 +766,13 @@ pub trait LivingEntity: Entity {
             damage = 0.0;
         }
 
-        // TODO: apply item blocking before actually_hurt once shield/use-item hooks exist.
+        let item_in_use = self
+            .living_base()
+            .active_item_use()
+            .filter(|_| self.is_using_item());
+        let damage_blocked = self.apply_item_blocking(world, source, damage);
+        damage -= damage_blocked;
+        let blocked = damage_blocked > 0.0;
         if source.is(&vanilla_damage_type_tags::DamageTypeTag::IS_FREEZING)
             && REGISTRY
                 .entity_types
@@ -777,11 +801,30 @@ pub trait LivingEntity: Entity {
         self.resolve_player_responsible_for_damage(source);
 
         if took_full_damage {
-            self.broadcast_damage_event(world, source);
-            if !source.is(&vanilla_damage_type_tags::DamageTypeTag::NO_IMPACT) {
+            // A shield broken by this block no longer runs `on_blocked`.
+            let mut blocks_attacks = None;
+            if blocked && let Some(active) = item_in_use {
+                self.with_equipment_slot(active.hand().into(), &mut |item| {
+                    if item.item() == active.item() {
+                        blocks_attacks = item.get(BLOCKS_ATTACKS).cloned();
+                    }
+                });
+            }
+            if let Some(blocks_attacks) = blocks_attacks {
+                blocks_attacks::on_blocked(&blocks_attacks, world, self);
+            } else {
+                self.broadcast_damage_event(world, source);
+            }
+
+            if !source.is(&vanilla_damage_type_tags::DamageTypeTag::NO_IMPACT)
+                && (!blocked || damage > 0.0)
+            {
                 self.mark_hurt();
             }
-            self.apply_damage_knockback(source);
+            let fully_blocked = blocked && damage <= 0.0;
+            if !fully_blocked {
+                self.apply_damage_knockback(source, blocked);
+            }
         }
 
         if self.is_dead_or_dying() {
@@ -796,9 +839,141 @@ pub trait LivingEntity: Entity {
         }
         // TODO: Play secondary hurt sounds once equipment effects expose them.
 
-        self.record_last_damage_source(source);
+        let success = !blocked || damage > 0.0;
+        if success {
+            self.record_last_damage_source(source);
+        }
 
-        true
+        if let Some(player) = self.as_player()
+            && damage_blocked > 0.0
+            && damage_blocked < DAMAGE_STAT_LIMIT
+        {
+            player.award_custom_stat_with_count(
+                &vanilla_custom_stats::DAMAGE_BLOCKED_BY_SHIELD,
+                round_f32(damage_blocked * DAMAGE_STAT_SCALE),
+            );
+        }
+
+        success
+    }
+
+    /// Reduces incoming damage with the item this entity is blocking with.
+    ///
+    /// Returns the amount of damage blocked.
+    fn apply_item_blocking(&self, world: &World, source: &DamageSource, damage: f32) -> f32 {
+        if damage <= 0.0 {
+            return 0.0;
+        }
+        let Some((hand, blocking_with)) = self.get_item_blocking_with() else {
+            return 0.0;
+        };
+        let Some(blocks_attacks) = blocking_with.get(BLOCKS_ATTACKS) else {
+            return 0.0;
+        };
+        if blocks_attacks.is_bypassed_by(source.damage_type) {
+            return 0.0;
+        }
+        // TODO: Piercing arrows bypass blocking once AbstractArrow exists.
+
+        let angle = source
+            .source_position()
+            .map_or(f64::from(PI), |source_position| {
+                let view = self.calculate_view_vector(0.0, self.y_head_rot());
+                let position = self.position();
+                let horizontal = DVec3::new(
+                    source_position.x - position.x,
+                    0.0,
+                    source_position.z - position.z,
+                );
+                let length = horizontal.length();
+                let to_source = if length < VEC3_NORMALIZE_EPSILON {
+                    DVec3::ZERO
+                } else {
+                    horizontal / length
+                };
+                to_source.dot(view).acos()
+            });
+
+        let damage_blocked =
+            blocks_attacks.resolve_blocked_damage(source.damage_type, damage, angle);
+        blocks_attacks::hurt_blocking_item(
+            blocks_attacks,
+            &blocking_with,
+            self,
+            hand,
+            damage_blocked,
+        );
+        if damage_blocked > 0.0
+            && !source.is(&vanilla_damage_type_tags::DamageTypeTag::IS_PROJECTILE)
+            && let Some(attacker) = source
+                .direct_entity()
+                .and_then(|entity| entity.as_living_entity())
+        {
+            self.block_using_item(world, attacker, source, damage, damage_blocked >= damage);
+        }
+        damage_blocked
+    }
+
+    /// Called on the defender after it blocks a melee attack from `attacker`.
+    fn block_using_item(
+        &self,
+        _world: &World,
+        attacker: &dyn LivingEntity,
+        source: &DamageSource,
+        damage: f32,
+        fully_blocked: bool,
+    ) {
+        let Some(defender) = self.as_living_entity() else {
+            return;
+        };
+        attacker.blocked_by_item(defender, source, damage, fully_blocked);
+    }
+
+    /// Called on the attacker after `defender` blocks its attack.
+    fn blocked_by_item(
+        &self,
+        defender: &dyn LivingEntity,
+        _source: &DamageSource,
+        _damage: f32,
+        fully_blocked: bool,
+    ) {
+        if fully_blocked {
+            return;
+        }
+        let position = self.position();
+        let defender_position = defender.position();
+        defender.knockback(
+            0.5,
+            defender_position.x - position.x,
+            defender_position.z - position.z,
+        );
+    }
+
+    /// Returns how long this entity's weapon disables a blocking item it hits.
+    ///
+    /// Vanilla only counts the weapon when it is also the active item, so a
+    /// main-hand weapon does not count while the off hand is in use, or when
+    /// it replaced the item being used in the main hand.
+    fn get_seconds_to_disable_blocking(&self) -> f32 {
+        if self.is_spectator() {
+            return 0.0;
+        }
+        let active = self
+            .living_base()
+            .active_item_use()
+            .filter(|_| self.is_using_item());
+        let mut seconds = 0.0;
+        self.with_weapon_item(&mut |weapon_item| {
+            seconds = weapon_item
+                .filter(|item| {
+                    active.is_none_or(|active| {
+                        active.hand() == InteractionHand::MainHand && active.item() == item.item()
+                    })
+                })
+                .and_then(ItemStack::get_weapon)
+                .map_or(0.0, |weapon| weapon.disable_blocking_for_seconds);
+        });
+        seconds
     }
 
     /// Hook before applying damage after vanilla reductions.
@@ -874,7 +1049,7 @@ pub trait LivingEntity: Entity {
             damage = (damage * absorb as f32 / 25.0).max(0.0);
             let damage_resisted = old_damage - damage;
             if (0.0..f32::MAX).contains(&damage_resisted) {
-                let stats_to_award = (damage_resisted * 10.0).round() as i32;
+                let stats_to_award = round_f32(damage_resisted * 10.0);
                 if let Some(player) = self.as_player() {
                     player.award_custom_stat_with_count(
                         &vanilla_custom_stats::DAMAGE_RESISTED,
@@ -924,26 +1099,99 @@ pub trait LivingEntity: Entity {
         {
             player.award_custom_stat_with_count(
                 &vanilla_custom_stats::DAMAGE_DEALT_ABSORBED,
-                (absorbed_damage * 10.0).round() as i32,
+                round_f32(absorbed_damage * 10.0),
             );
         }
 
         if damage != 0.0 {
+            self.record_combat_damage(source, damage);
             self.set_health(self.get_health() - damage);
             self.set_absorption_amount(self.get_absorption_amount() - damage);
             self.game_event(&vanilla_game_events::ENTITY_DAMAGE);
         }
     }
 
+    /// Records damage and enters combat when a living entity caused it.
+    fn record_combat_damage(&self, source: &DamageSource, damage: f32) {
+        self.recheck_combat_status();
+
+        let tick_count = self.tick_count();
+        self.living_base().record_combat_damage(
+            source,
+            damage,
+            self.current_fall_location(),
+            self.fall_distance() as f32,
+            tick_count,
+        );
+
+        let caused_by_living = source
+            .causing_entity()
+            .is_some_and(|entity| entity.as_living_entity().is_some());
+        if caused_by_living && Entity::is_alive(self) && self.living_base().enter_combat(tick_count)
+        {
+            self.on_enter_combat();
+        }
+    }
+
+    /// Resets expired combat state, notifying when combat ends.
+    fn recheck_combat_status(&self) {
+        if self
+            .living_base()
+            .recheck_combat_status(self.tick_count(), Entity::is_alive(self))
+        {
+            self.on_leave_combat();
+        }
+    }
+
+    /// Returns the combat duration in ticks.
+    fn combat_duration(&self) -> i32 {
+        self.living_base().combat_duration(self.tick_count())
+    }
+
+    /// Returns where this entity was climbing or swimming, if anywhere.
+    fn current_fall_location(&self) -> Option<FallLocation> {
+        if let Some(pos) = self.last_climbable_pos() {
+            self.level()
+                .map(|world| FallLocation::from_block_state(world.get_block_state(pos)))
+        } else if self.is_in_water() {
+            Some(FallLocation::Water)
+        } else {
+            None
+        }
+    }
+
+    /// Called when this entity enters combat.
+    fn on_enter_combat(&self) {}
+
+    /// Called when this entity leaves combat.
+    fn on_leave_combat(&self) {}
+
+    /// Returns the death message built from this entity's combat entries.
+    fn get_death_message(&self) -> TextComponent {
+        death_message(self)
+    }
+
+    /// Drops recorded combat entries without changing combat status.
+    ///
+    /// Entries retain strong damage-source references, so entities leaving the
+    /// world must release them to avoid mutual ownership cycles.
+    fn clear_combat_history(&self) {
+        self.living_base().clear_combat_history();
+    }
+
     /// Applies vanilla hurt knockback for a damage source.
-    fn apply_damage_knockback(&self, source: &DamageSource) {
+    ///
+    /// Partially blocked hits still knock back but skip the hurt indicator.
+    fn apply_damage_knockback(&self, source: &DamageSource, blocked: bool) {
         if source.is(&vanilla_damage_type_tags::DamageTypeTag::NO_KNOCKBACK) {
             return;
         }
 
         let (xd, zd) = self.damage_knockback_direction(source);
         self.knockback(DAMAGE_KNOCKBACK_POWER, xd, zd);
-        self.indicate_damage(xd, zd);
+        if !blocked {
+            self.indicate_damage(xd, zd);
+        }
     }
 
     /// Returns the horizontal direction used by vanilla damage knockback.
@@ -1222,7 +1470,7 @@ pub trait LivingEntity: Entity {
 
         let entity_type = self.entity_type();
         let loot_key = Identifier::vanilla(format!("entities/{}", entity_type.key.path));
-        REGISTRY.loot_tables.by_key(&loot_key)
+        LOOT_TABLES.by_key(&loot_key)
     }
 
     /// Returns the loot-table seed for this entity's death loot, if it's a mob.
@@ -1246,32 +1494,25 @@ pub trait LivingEntity: Entity {
         };
 
         let seed = self.death_loot_table_seed();
-        let drops = if seed == 0 {
-            let mut rng = rand::rng();
+        let drops = world.with_loot_random(Some(loot_table), seed, |rng| {
             death_loot_items_with_rng(
                 self,
                 loot_table,
                 world.as_ref(),
                 source,
                 killed_by_player,
-                &mut rng,
+                rng,
             )
-        } else {
-            let mut rng = StdRng::seed_from_u64(seed as u64);
-            death_loot_items_with_rng(
-                self,
-                loot_table,
-                world.as_ref(),
-                source,
-                killed_by_player,
-                &mut rng,
-            )
-        };
+        });
 
         if has_custom_death_loot_table && let Some(mob) = self.as_mob() {
             mob.clear_custom_death_loot_table();
         }
 
+        let drops = drops.unwrap_or_else(|error| {
+            log::error!("Failed to generate death loot {}: {error}", loot_table.key);
+            Vec::new()
+        });
         for item_stack in drops {
             self.spawn_at_location(item_stack, 0.0);
         }
@@ -1489,18 +1730,20 @@ pub trait LivingEntity: Entity {
             return false;
         }
         let (effect_key, amplifier) = (effect.effect(), effect.amplifier());
-        let changed = self.living_base().add_mob_effect(effect);
-        // TODO: Trigger CriteriaTriggers.EFFECTS_CHANGED with `source` when `changed`,
+        let result = self.living_base().add_mob_effect(effect);
+        // TODO: Trigger CriteriaTriggers.EFFECTS_CHANGED with `source` when `result.changed()`,
         // once the advancement-criteria foundation exists.
         let _ = source;
-        // Calls on_effect_started unconditionally, even when it didn't replace a stronger instance.
         let dyn_self = self
             .as_living_entity()
             .expect("Self implements LivingEntity");
-        MOB_EFFECT_BEHAVIORS
-            .get_behavior(effect_key)
-            .on_effect_started(dyn_self, amplifier);
-        changed
+        let behavior = MOB_EFFECT_BEHAVIORS.get_behavior(effect_key);
+        if result == MobEffectAddResult::Added {
+            behavior.on_effect_added(dyn_self, effect_key, amplifier);
+        }
+        // Calls on_effect_started unconditionally, even when it didn't replace a stronger instance.
+        behavior.on_effect_started(dyn_self, amplifier);
+        result.changed()
     }
 
     /// Sets the presence of a vanilla mob effect.
@@ -1715,9 +1958,39 @@ pub trait LivingEntity: Entity {
         false
     }
 
+    /// Stops active item use without calling item hooks.
+    fn stop_using_item(&self) {
+        self.living_base().stop_using_item();
+    }
+
     /// Checks if the entity is blocking with a shield or similar item.
     fn is_blocking(&self) -> bool {
-        false
+        self.get_item_blocking_with().is_some()
+    }
+
+    /// Returns the hand and stack this entity is blocking with, once the
+    /// item's block delay has elapsed.
+    fn get_item_blocking_with(&self) -> Option<(InteractionHand, ItemStack)> {
+        if !self.is_using_item() {
+            return None;
+        }
+        let user = self.as_living_entity()?;
+        let active = self.living_base().active_item_use()?;
+        let mut blocking_item = None;
+        self.with_equipment_slot(active.hand().into(), &mut |item| {
+            if item.item() == active.item()
+                && let Some(blocks_attacks) = item.get(BLOCKS_ATTACKS)
+            {
+                blocking_item = Some((item.clone(), blocks_attacks.block_delay_ticks()));
+            }
+        });
+        // Use duration is read outside the equipment lock so behaviors may inspect the user.
+        let (use_item, block_delay_ticks) = blocking_item?;
+        let use_duration = ITEM_BEHAVIORS
+            .get_behavior(use_item.item())
+            .get_use_duration(&use_item, user);
+        (use_duration - active.remaining_ticks() >= block_delay_ticks)
+            .then_some((active.hand(), use_item))
     }
 
     /// Checks if the entity is fall flying (using elytra).
@@ -2105,6 +2378,12 @@ pub trait LivingEntity: Entity {
             .tick_fall_flying_state(self.is_fall_flying());
         self.refresh_dirty_attributes();
         self.living_base().tick_post_impulse_grace_time();
+        self.living_base().tick_last_hurt_by_player_memory();
+        self.living_base()
+            .tick_living_combat_memory(self.tick_count());
+        if self.tick_count() % TICKS_PER_SECOND == 0 {
+            self.recheck_combat_status();
+        }
     }
 
     /// Returns whether the given item in the given slot allows elytra-style gliding.
@@ -2191,8 +2470,8 @@ pub trait LivingEntity: Entity {
         self.living_base().last_climbable_pos()
     }
 
-    /// Records the last climbable block position this living entity touched.
-    fn set_last_climbable_pos(&self, pos: BlockPos) {
+    /// Records or clears the last climbable block position this living entity touched.
+    fn set_last_climbable_pos(&self, pos: Option<BlockPos>) {
         self.living_base().set_last_climbable_pos(pos);
     }
 
@@ -2219,7 +2498,7 @@ pub trait LivingEntity: Entity {
                 && trapdoor_usable_as_ladder_state(state, world.get_block_state(pos.below()));
 
         if climbable {
-            self.set_last_climbable_pos(pos);
+            self.set_last_climbable_pos(Some(pos));
         }
 
         climbable
@@ -2516,24 +2795,12 @@ pub trait LivingEntity: Entity {
 
     /// Pushes nearby colliding entities away from this one.
     fn push_entities(&self) {
-        let Some(world) = self.level() else {
-            return;
-        };
-        if !world.tick_runs_normally() {
-            return;
-        }
+        EntityPush::push_entities(self);
+    }
 
-        let pusher = self.as_entity_event_source();
-        let pushable_entities = world.get_pushable_entities(pusher, &self.bounding_box());
-        if pushable_entities.is_empty() {
-            return;
-        }
-
-        self.apply_entity_cramming_damage(&world, &pushable_entities);
-
-        for entity in pushable_entities {
-            entity.push_entity(pusher);
-        }
+    /// Pushes against `entities` in the given order. The caller applies cramming damage first.
+    fn push_entities_in_order(&self, entities: &[SharedEntity]) {
+        EntityPush::push_entities_in_order(self.as_entity_event_source(), entities);
     }
 
     /// Applies vanilla max entity cramming damage from `LivingEntity.pushEntities()`.
@@ -2627,7 +2894,7 @@ pub trait LivingEntity: Entity {
     /// Returns the vertical friction used by `travelInAir`.
     fn air_travel_vertical_friction(&self, _horizontal_friction: f32) -> f32 {
         // TODO: FlyingAnimal uses horizontal friction here once animal types exist.
-        0.98
+        self.get_air_drag() as f32
     }
 
     /// Clamps movement while on a climbable block: caps horizontal and
@@ -2696,11 +2963,16 @@ pub trait LivingEntity: Entity {
         let world = self.level()?;
         let pos_below = self.block_pos_below_that_affects_movement()?;
         let block_friction = if self.on_ground() {
-            world.get_block_state(pos_below).get_block().config.friction
+            let friction = world.get_block_state(pos_below).get_block().config.friction;
+            let modifier =
+                self.attributes()
+                    .lock()
+                    .required_value(vanilla_attributes::FRICTION_MODIFIER) as f32;
+
+            compute_modified_friction(friction, modifier)
         } else {
             1.0
         };
-        let horizontal_friction = block_friction * 0.91;
         let (movement, result) =
             self.handle_relative_friction_and_calculate_movement(entity, input, block_friction)?;
         let movement_y = if let Some(levitation_y) = self.levitation_travel_y_delta(movement.y) {
@@ -2712,7 +2984,14 @@ pub trait LivingEntity: Entity {
         if self.should_discard_friction() {
             self.set_velocity(DVec3::new(movement.x, movement_y, movement.z));
         } else {
+            let air_drag_modifier =
+                self.attributes()
+                    .lock()
+                    .required_value(vanilla_attributes::AIR_DRAG_MODIFIER) as f32;
+            let horizontal_friction =
+                block_friction * compute_modified_friction(0.91, air_drag_modifier);
             let vertical_friction = self.air_travel_vertical_friction(horizontal_friction);
+
             self.set_velocity(DVec3::new(
                 movement.x * f64::from(horizontal_friction),
                 movement_y * f64::from(vertical_friction),
@@ -3121,8 +3400,8 @@ pub trait LivingEntity: Entity {
                 );
                 let look_direction = (bed_center - stand_up).normalize_or_zero();
                 let yaw = wrap_degrees(
-                    (look_direction.z.atan2(look_direction.x).to_degrees() - f64::from(DEGREE_90))
-                        as f32,
+                    (trig::atan2(look_direction.z, look_direction.x) * RAD_TO_DEG_F64
+                        - f64::from(DEGREE_90)) as f32,
                 );
                 if let Err(error) = self.try_set_position(stand_up) {
                     log::warn!(
@@ -3294,14 +3573,14 @@ fn random_teleport_ground_y(world: &Arc<World>, x: f64, y: f64, z: f64) -> Optio
     None
 }
 
-fn death_loot_items_with_rng<R: rand::Rng, E: LivingEntity + ?Sized>(
+fn death_loot_items_with_rng<E: LivingEntity + ?Sized>(
     entity: &E,
     loot_table: LootTableRef,
     world: &World,
     source: &DamageSource,
     killed_by_player: bool,
-    rng: &mut R,
-) -> Vec<ItemStack> {
+    rng: &mut RandomSource,
+) -> LootResult<Vec<ItemStack>> {
     let causing_entity = source.causing_entity().map(AsRef::as_ref);
     let direct_entity = source.direct_entity().map(AsRef::as_ref);
     let last_damage_player = if killed_by_player {
@@ -3314,6 +3593,10 @@ fn death_loot_items_with_rng<R: rand::Rng, E: LivingEntity + ?Sized>(
     let this_equipment = living_loot_equipment(entity);
     let causing_equipment = causing_entity.and_then(loot_equipment);
     let direct_equipment = direct_entity.and_then(loot_equipment);
+    let luck = last_damage_player
+        .as_deref()
+        .and_then(Entity::as_player)
+        .map_or(0.0, Player::get_luck);
     let last_damage_player_equipment = last_damage_player.as_deref().and_then(loot_equipment);
     let this_entity = entity_loot_ref(entity.as_entity_event_source(), Some(&this_equipment));
     let causing_entity =
@@ -3330,7 +3613,9 @@ fn death_loot_items_with_rng<R: rand::Rng, E: LivingEntity + ?Sized>(
     };
 
     let mut context = LootContext::new(rng)
-        .with_origin(position.x, position.y, position.z)
+        .with_world(world)
+        .with_luck(luck)
+        .with_origin(position)
         .with_game_time(world.game_time())
         .with_killed_by_player(killed_by_player)
         .with_this_entity(this_entity)
@@ -3348,25 +3633,46 @@ fn death_loot_items_with_rng<R: rand::Rng, E: LivingEntity + ?Sized>(
     loot_table.get_random_items(&mut context)
 }
 
+/// Selects the world's loot stream for shearing before resolving its parameters.
+pub(crate) fn shearing_loot_items<E: LivingEntity + ?Sized>(
+    entity: &E,
+    loot_table: LootTableRef,
+    world: &World,
+    tool: &ItemStack,
+) -> Vec<ItemStack> {
+    world
+        .with_loot_random(Some(loot_table), 0, |rng| {
+            shearing_loot_items_with_rng(entity, loot_table, tool, rng)
+        })
+        .unwrap_or_else(|error| {
+            log::error!(
+                "Failed to generate shearing loot {}: {error}",
+                loot_table.key
+            );
+            Vec::new()
+        })
+}
+
 /// Runs vanilla `LivingEntity.dropFromShearingLootTable` for `loot_table`, returning the
 /// drops resolved with the vanilla shearing loot params (origin, entity, tool).
-pub(crate) fn shearing_loot_items_with_rng<R: rand::Rng, E: LivingEntity + ?Sized>(
+pub(crate) fn shearing_loot_items_with_rng<E: LivingEntity + ?Sized>(
     entity: &E,
     loot_table: LootTableRef,
     tool: &ItemStack,
-    rng: &mut R,
-) -> Vec<ItemStack> {
+    rng: &mut RandomSource,
+) -> LootResult<Vec<ItemStack>> {
     let position = entity.position();
     let equipment = living_loot_equipment(entity);
     let mut context = LootContext::new(rng)
-        .with_origin(position.x, position.y, position.z)
+        .with_origin(position)
         .with_this_entity(entity_loot_ref(
             entity.as_entity_event_source(),
             Some(&equipment),
         ))
         .with_tool(tool);
-    if let Some(level) = entity.level() {
-        context = context.with_game_time(level.game_time());
+    let level = entity.level();
+    if let Some(level) = level.as_deref() {
+        context = context.with_world(level).with_game_time(level.game_time());
     }
     loot_table.get_random_items(&mut context)
 }

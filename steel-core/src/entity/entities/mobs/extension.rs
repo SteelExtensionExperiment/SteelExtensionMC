@@ -693,7 +693,7 @@ impl Mob for ExtensionMob {
     }
 
     fn do_hurt_target(&self, entity: &SharedEntity, world: &World, target: &SharedEntity) -> bool {
-        let hurt = self.vanilla_do_hurt_target(entity, world, target);
+        let hurt = crate::entity::mob::do_hurt_target_default(self, entity, world, target);
         if hurt {
             self.notify_attacked(target.as_ref());
         }

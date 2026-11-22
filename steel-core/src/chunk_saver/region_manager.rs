@@ -811,6 +811,7 @@ mod tests {
         let persistent = PersistentChunk {
             block_attachments: Vec::new(),
             last_modified: 0,
+            inhabited_time: 0,
             block_states: Vec::new(),
             biomes: Vec::new(),
             sections: Vec::new(),

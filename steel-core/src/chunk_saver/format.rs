@@ -61,7 +61,8 @@ pub const REGION_MAGIC: [u8; 4] = *b"STLR";
 /// v23: Replaced Noise, Surface, and Carvers with Terrain status; removed persisted carving masks.
 /// v24: Persist temporary terrain restoration with its chunk.
 /// v25: Replace terrain-specific records with namespaced block attachments.
-pub const FORMAT_VERSION: u16 = 25;
+/// v26: Persist chunk inhabited time alongside block attachments.
+pub const FORMAT_VERSION: u16 = 26;
 
 /// Number of chunks per region side (32×32 = 1024 chunks per region).
 pub const REGION_SIZE: usize = 32;
@@ -368,6 +369,8 @@ pub struct PersistentChunk<'a> {
     pub block_attachments: Vec<PersistentBlockAttachment>,
     /// Unix timestamp of last modification.
     pub last_modified: u32,
+    /// Game ticks this chunk spent as a natural-spawn candidate.
+    pub inhabited_time: i64,
     /// Block states used in this chunk. Sections reference indices into this.
     pub block_states: Vec<PersistentBlockState<'a>>,
     /// Biomes used in this chunk. Sections reference indices into this.
@@ -470,7 +473,7 @@ pub struct PersistentBlockEntity {
     /// Block entity type identifier, or `None` for Vanilla's pending `DUMMY` marker.
     pub entity_type: Option<Identifier>,
     /// Serialized NBT data (simdnbt binary format).
-    /// Contains the block entity's custom data from `save_additional`.
+    /// Contains entity-specific data and stored components without type/position metadata.
     pub nbt_data: Vec<u8>,
 }
 

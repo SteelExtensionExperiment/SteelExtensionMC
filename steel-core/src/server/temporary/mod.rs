@@ -4,7 +4,10 @@ use super::{
     PlayerAdmissionState, Server,
     jobs::{JobPoll, ServerJob, ServerJobContext},
 };
-use crate::{chunk::chunk_request::ChunkRequestHandle, level_data::GameTimeSource, world::World};
+use crate::{
+    chunk::chunk_request::ChunkRequestHandle, level_data::GameTimeSource,
+    loot::random_sequences::RandomSequences, world::World,
+};
 use rustc_hash::FxHashMap;
 use tokio::task::JoinHandle;
 use tokio_util::task::TaskTracker;
@@ -99,14 +102,26 @@ impl Server {
         if !(dimension.min_y..dimension.min_y + dimension.height).contains(&request.spawn.y()) {
             return Err("spawn is outside the dimension build height".into());
         }
-        let game_time_source = if request.primary {
-            GameTimeSource::Primary
+        let (game_time_source, random_sequences) = if request.primary {
+            (
+                GameTimeSource::Primary,
+                Arc::new(RandomSequences::new(request.seed)),
+            )
         } else {
             let primary = self
                 .worlds
                 .default_world(&domain)
                 .ok_or("temporary domain is not loaded")?;
-            GameTimeSource::Derived(Arc::clone(&primary.game_time))
+            let sequences = primary
+                .random_sequences
+                .read()
+                .as_ref()
+                .map(Arc::clone)
+                .ok_or("temporary domain has no loot random sequences")?;
+            (
+                GameTimeSource::Derived(Arc::clone(&primary.game_time)),
+                sequences,
+            )
         };
         let id = {
             let mut state = self.temporary_worlds.state.lock();
@@ -138,8 +153,15 @@ impl Server {
         let (sender, receiver) = mpsc::channel();
         let server = Arc::clone(self);
         let task = self.temporary_worlds.cleanup.spawn(async move {
-            let result =
-                PreparedWorld::prepare(server, source, request, validated, game_time_source).await;
+            let result = PreparedWorld::prepare(
+                server,
+                source,
+                request,
+                validated,
+                game_time_source,
+                random_sequences,
+            )
+            .await;
             let _ = sender.send(result);
         });
         self.jobs.spawn(CreateWorldJob {

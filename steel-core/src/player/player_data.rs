@@ -5,8 +5,11 @@
 use rustc_hash::FxHashSet;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::stat::Stat;
+use steel_utils::Identifier;
 use steel_utils::types::GameType;
 
+use super::advancement::PlayerAdvancement;
+use super::advancement::progress::AdvancementProgress;
 use super::{
     Player, PlayerRespawnConfig, abilities::Abilities, experience::Experience, food_data::FoodData,
     player_inventory::PlayerInventory,
@@ -23,7 +26,7 @@ use crate::{
 
 /// Current data version for player saves.
 /// Increment when making breaking changes to the format.
-pub const PLAYER_DATA_VERSION: i32 = 6;
+pub const PLAYER_DATA_VERSION: i32 = 7;
 
 /// Persistent player data saved by Steel's storage backend.
 ///
@@ -106,6 +109,9 @@ pub struct PersistentPlayerData {
     /// Vanilla `Player.totalExperience`, updated by point grants but independent of level/progress.
     pub experience_total: i32,
 
+    /// Saved enchantment seed (`XpSeed`); zero is rerolled when loaded.
+    pub enchantment_seed: i32,
+
     /// Vanilla death-screen score. Point grants change it with Java `int` wrapping.
     pub score: i32,
 
@@ -126,8 +132,12 @@ pub struct PersistentPlayerData {
 
     /// The tracked statistics of the player with their counters.
     pub stats: Vec<PersistentStat>,
+
     /// Shared native and extension custom data belonging to this gameplay domain.
     pub custom_data: CustomData,
+
+    /// Persisted advancement progress keyed by advancement identifier.
+    pub advancements: Vec<(Identifier, AdvancementProgress)>,
 }
 
 /// A vanilla `RootVehicle` tree persisted with player data.
@@ -227,15 +237,21 @@ impl PersistentPlayerData {
             }
         }
 
-        let (experience_level, experience_progress, experience_total) = {
+        let (experience_level, experience_progress, experience_total, enchantment_seed) = {
             let lock = player.experience.lock();
-            (lock.level(), lock.progress(), lock.total_points())
+            (
+                lock.level(),
+                lock.progress(),
+                lock.total_points(),
+                lock.enchantment_seed(),
+            )
         };
         let score = player.score();
         let root_vehicle = Self::root_vehicle_from_player(player)
             .or_else(|| player.pending_root_vehicle_for_current_world());
         let ender_pearls = Self::ender_pearls_from_player(player);
         let stats = Self::stats_from_player(player);
+        let advancements = player.advancements.lock().persisted_progress();
 
         Ok(Self {
             pos: [pos.x, pos.y, pos.z],
@@ -273,6 +289,7 @@ impl PersistentPlayerData {
             experience_level,
             experience_progress,
             experience_total,
+            enchantment_seed,
             score,
             seen_credits: player.has_seen_credits(),
             root_vehicle,
@@ -282,6 +299,7 @@ impl PersistentPlayerData {
             ender_items,
             stats,
             custom_data: player.data().clone(),
+            advancements,
         })
     }
 
@@ -349,6 +367,7 @@ impl Player {
         *self.food_data.lock() = FoodData::new();
         self.stats.lock().reset();
         *self.data() = CustomData::default();
+        *self.advancements.lock() = PlayerAdvancement::default();
 
         let mut experience = Experience::default();
         experience.dirty = true;
@@ -509,7 +528,8 @@ impl PersistentPlayerData {
                 self.experience_level,
                 self.experience_progress,
                 self.experience_total,
-            );
+            )
+            .with_loaded_enchantment_seed(self.enchantment_seed, rand::random);
         }
         player.set_score(self.score);
         player.set_seen_credits(self.seen_credits);
@@ -528,5 +548,10 @@ impl PersistentPlayerData {
                 stats.stats.insert(*stat, (*count, StatState::Dirty));
             }
         }
+
+        player
+            .advancements
+            .lock()
+            .apply_persisted_progress(self.advancements.iter().cloned());
     }
 }

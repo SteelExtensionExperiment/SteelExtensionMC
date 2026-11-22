@@ -103,12 +103,7 @@ fn owned_mobs_keep_one_hp_and_can_heal_recall_and_release() -> Result<(), String
 
 fn mob(world: &Arc<World>, kind: EntityTypeRef) -> Result<SharedEntity, String> {
     let entity = ENTITIES
-        .create(
-            kind,
-            next_entity_id(),
-            DVec3::new(8.5, 65.0, 8.5),
-            Arc::downgrade(world),
-        )
+        .create(kind, DVec3::new(8.5, 65.0, 8.5), Arc::downgrade(world))
         .ok_or("mob factory missing")?;
     world
         .try_add_entity(Arc::clone(&entity))

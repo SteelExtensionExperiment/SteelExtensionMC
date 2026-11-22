@@ -1,15 +1,18 @@
 //! Vanilla-shaped mob foundations.
 
 mod pathfinder;
+mod spawn_armor;
 
 use crate::entity::leash::{LeashData, Leashable};
 pub use pathfinder::PathfinderMob;
 use pathfinder::tick_path_navigation_target;
 #[cfg(test)]
 use pathfinder::{find_ground_path_target_surface, path_end_node_can_reach_target};
+use spawn_armor::VANILLA_SPAWN_ARMOR_TIERS;
 
 use std::sync::Arc;
 
+use crate::loot::{LOOT_TABLES, LootTableRef};
 use glam::DVec3;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtTag};
@@ -24,7 +27,6 @@ use steel_registry::enchantment_effect::EnchantmentEffectComponent;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
-use steel_registry::loot_table::LootTableRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::{
@@ -33,6 +35,8 @@ use steel_registry::{
     vanilla_game_rules, vanilla_items,
 };
 use steel_utils::locks::SyncMutex;
+use steel_utils::nbt::NbtNumeric as _;
+use steel_utils::nbt::NbtValueInput as _;
 use steel_utils::types::{Difficulty, InteractionHand};
 use steel_utils::{
     BlockPos, ChunkPos, Downcast as _, Identifier, TICKS_PER_SECOND, WorldAabb, axis::Axis,
@@ -62,26 +66,33 @@ use crate::inventory::equipment::EquipmentSlot;
 use crate::physics::MoveResult;
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
-use crate::world::{LevelReader, World};
+use crate::world::{DifficultyInstance, LevelReader, World};
 
 const MOB_FLAG_NO_AI: i8 = 1;
 const MOB_FLAG_LEFT_HANDED: i8 = 2;
 const MOB_FLAG_AGGRESSIVE: i8 = 4;
-const MOVE_CONTROL_MIN_SPEED_SQR: f64 = 2.500_000_3e-7;
+const MOVE_CONTROL_MIN_SPEED_SQR: f64 = 2.500_000_3e-7_f32 as f64;
 const MOVE_CONTROL_MAX_TURN: f32 = DEGREE_90;
+const LOOK_CONTROL_MIN_DELTA: f64 = 1.0e-5_f32 as f64;
 const DEFAULT_EQUIPMENT_DROP_CHANCE: f32 = 0.085;
 /// Vanilla bias subtracted from the roll before comparing against a slot's drop
 /// chance when a mob swaps out worn gear it picked something better up over.
 const REPLACED_EQUIPMENT_DROP_BIAS: f32 = 0.1;
 const PRESERVE_ITEM_DROP_CHANCE_THRESHOLD: f32 = 1.0;
 const PRESERVE_ITEM_DROP_CHANCE: f32 = 2.0;
-const BODY_ROTATION_MOVING_DISTANCE_SQR: f64 = 2.500_000_3e-7;
+const BODY_ROTATION_MOVING_DISTANCE_SQR: f64 = 2.500_000_3e-7_f32 as f64;
 const TARGET_REACH_DISTANCE_SQR: f64 = 2.25;
 const DEFAULT_ATTACK_REACH_BASE: f32 = 2.04;
 const DEFAULT_ATTACK_REACH_OFFSET: f32 = 0.6;
-const RANDOM_SPAWN_BONUS_ID: Identifier = Identifier::vanilla_static("random_spawn_bonus");
+pub(crate) const RANDOM_SPAWN_BONUS_ID: Identifier =
+    Identifier::vanilla_static("random_spawn_bonus");
 const RANDOM_SPAWN_BONUS_SCALE: f64 = 0.114_850_000_000_000_01;
 const LEFT_HANDED_SPAWN_CHANCE: f32 = 0.05;
+const MAX_WEARING_ARMOR_CHANCE: f32 = 0.15;
+const WEARING_ARMOR_UPGRADE_MATERIAL_CHANCE: f32 = 0.1087;
+const WEARING_ARMOR_UPGRADE_MATERIAL_ATTEMPTS: i32 = 3;
+const HARD_ARMOR_PARTIAL_CHANCE: f32 = 0.1;
+const OTHER_ARMOR_PARTIAL_CHANCE: f32 = 0.25;
 /// Vanilla `Mob.ITEM_PICKUP_REACH`: the per-axis distance the item-pickup search
 /// box is inflated by when a mob looks for nearby dropped items to collect.
 const ITEM_PICKUP_REACH: DVec3 = DVec3::new(1.0, 0.0, 1.0);
@@ -150,7 +161,10 @@ impl DropChances {
 
         let mut loaded = Self::DEFAULT;
         for slot in EquipmentSlot::ALL {
-            let Some(chance) = drop_chances.float(slot.name()) else {
+            let Some(chance) = drop_chances
+                .get(slot.name())
+                .and_then(|tag| tag.codec_f32())
+            else {
                 continue;
             };
             if !loaded.set_equipment_chance(slot, chance) {
@@ -516,15 +530,17 @@ pub trait Mob: LivingEntity + Leashable {
     fn finalize_spawn(
         &self,
         world: &Arc<World>,
+        difficulty: DifficultyInstance,
         spawn_reason: EntitySpawnReason,
         group_data: Option<SpawnGroupData>,
     ) -> Option<SpawnGroupData> {
-        self.finalize_spawn_mob_base(world, spawn_reason, group_data)
+        self.finalize_spawn_mob_base(world, difficulty, spawn_reason, group_data)
     }
 
     fn finalize_spawn_mob_base(
         &self,
         _world: &Arc<World>,
+        _difficulty: DifficultyInstance,
         _spawn_reason: EntitySpawnReason,
         group_data: Option<SpawnGroupData>,
     ) -> Option<SpawnGroupData> {
@@ -549,6 +565,11 @@ pub trait Mob: LivingEntity + Leashable {
         }
         self.set_left_handed(left_handed);
         group_data
+    }
+
+    /// Gives this mob vanilla's difficulty-scaled default armor.
+    fn populate_default_equipment_slots(&self, difficulty: DifficultyInstance) {
+        populate_default_equipment_slots_default(self, difficulty);
     }
 
     /// Creates a replacement or split mob and transfers state according to `params`.
@@ -692,6 +713,9 @@ pub trait Mob: LivingEntity + Leashable {
     fn mob_interact(&self, _player: &Player, _hand: InteractionHand) -> InteractionResult {
         InteractionResult::Pass
     }
+
+    /// Runs after a player spawns this mob's offspring with a spawn egg.
+    fn on_offspring_spawned_from_egg(&self, _spawner: &Player, _offspring: &SharedEntity) {}
 
     /// Returns whether this mob's equipment can be sheared; false while
     /// something is riding it.
@@ -877,10 +901,9 @@ pub trait Mob: LivingEntity + Leashable {
             true
         } else if slot.is_armor() {
             self.compare_armor(new_item_stack, current_item_stack, slot)
-        } else if slot == EquipmentSlot::MainHand {
-            self.compare_weapons(new_item_stack, current_item_stack, slot)
         } else {
-            false
+            slot == EquipmentSlot::MainHand
+                && self.compare_weapons(new_item_stack, current_item_stack, slot)
         }
     }
 
@@ -1152,13 +1175,16 @@ pub trait Mob: LivingEntity + Leashable {
 
     fn load_mob(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
         self.load_equipment(nbt);
-        self.set_can_pick_up_loot(nbt.byte("CanPickUpLoot").is_some_and(|value| value != 0));
+        self.set_can_pick_up_loot(
+            nbt.byte_value("CanPickUpLoot")
+                .is_some_and(|value| value != 0),
+        );
         *self.mob_base().persistence_required().lock() = nbt
-            .byte("PersistenceRequired")
+            .byte_value("PersistenceRequired")
             .is_some_and(|value| value != 0);
         *self.mob_base().drop_chances().lock() = DropChances::load(nbt);
         *self.mob_base().leash_data().lock() = LeashData::load(nbt);
-        let home_radius = nbt.int("home_radius").unwrap_or(-1);
+        let home_radius = nbt.int_value("home_radius").unwrap_or(-1);
         if home_radius >= 0 {
             let home_position = nbt
                 .int_array("home_pos")
@@ -1171,14 +1197,14 @@ pub trait Mob: LivingEntity + Leashable {
             self.clear_home();
         }
 
-        self.set_left_handed(nbt.byte("LeftHanded").is_some_and(|value| value != 0));
+        self.set_left_handed(nbt.byte_value("LeftHanded").is_some_and(|value| value != 0));
         let death_loot_table = nbt
             .string("DeathLootTable")
             .and_then(|loot_table| loot_table.to_str().as_ref().parse().ok());
         *self.mob_base().death_loot_table().lock() = death_loot_table;
         *self.mob_base().death_loot_table_seed().lock() =
-            nbt.long("DeathLootTableSeed").unwrap_or(0);
-        self.set_no_ai(nbt.byte("NoAI").is_some_and(|value| value != 0));
+            nbt.long_value("DeathLootTableSeed").unwrap_or(0);
+        self.set_no_ai(nbt.byte_value("NoAI").is_some_and(|value| value != 0));
     }
 
     fn set_death_loot_table(&self, loot_table: Option<Identifier>) {
@@ -1194,7 +1220,7 @@ pub trait Mob: LivingEntity + Leashable {
             .death_loot_table()
             .lock()
             .as_ref()
-            .and_then(|key| REGISTRY.loot_tables.by_key(key))
+            .and_then(|key| LOOT_TABLES.by_key(key))
     }
 
     fn has_custom_death_loot_table(&self) -> bool {
@@ -1246,6 +1272,9 @@ pub trait Mob: LivingEntity + Leashable {
     }
 
     fn check_mob_despawn(&self) {
+        const RANDOM_DESPAWN_MIN_IDLE_TICKS: i32 = 600;
+        const RANDOM_DESPAWN_CHANCE_BOUND: i32 = 800;
+
         if self
             .level()
             .is_some_and(|world| world.difficulty() == Difficulty::Peaceful)
@@ -1255,11 +1284,7 @@ pub trait Mob: LivingEntity + Leashable {
             return;
         }
 
-        if self.is_persistence_required() || self.requires_custom_persistence() {
-            self.set_no_action_time(0);
-            return;
-        }
-
+        let is_persistent = self.is_persistence_required() || self.requires_custom_persistence();
         let Some(nearest_player_dist_sqr) = self.nearest_player_distance_sqr() else {
             return;
         };
@@ -1267,23 +1292,24 @@ pub trait Mob: LivingEntity + Leashable {
         let mob_category = self.entity_type().mob_category;
         let despawn_distance = mob_category.despawn_distance();
         let despawn_distance_sqr = despawn_distance * despawn_distance;
-        if nearest_player_dist_sqr > f64::from(despawn_distance_sqr)
+
+        if !is_persistent
+            && nearest_player_dist_sqr > f64::from(despawn_distance_sqr)
             && self.remove_when_far_away(nearest_player_dist_sqr)
         {
             self.set_removed(RemovalReason::Discarded);
-            return;
         }
 
         let no_despawn_distance = mob_category.no_despawn_distance();
         let no_despawn_distance_sqr = no_despawn_distance * no_despawn_distance;
-        if self.no_action_time() > 600
+
+        if !is_persistent
+            && self.no_action_time() > RANDOM_DESPAWN_MIN_IDLE_TICKS
+            && rand::random_range(0..RANDOM_DESPAWN_CHANCE_BOUND) == 0
             && nearest_player_dist_sqr > f64::from(no_despawn_distance_sqr)
             && self.remove_when_far_away(nearest_player_dist_sqr)
         {
-            let should_discard = rand::random_range(0..800) == 0;
-            if should_discard {
-                self.set_removed(RemovalReason::Discarded);
-            }
+            self.set_removed(RemovalReason::Discarded);
         } else if nearest_player_dist_sqr < f64::from(no_despawn_distance_sqr) {
             self.set_no_action_time(0);
         }
@@ -1354,79 +1380,7 @@ pub trait Mob: LivingEntity + Leashable {
     /// the target was hurt.
     #[must_use]
     fn do_hurt_target(&self, entity: &SharedEntity, world: &World, target: &SharedEntity) -> bool {
-        self.vanilla_do_hurt_target(entity, world, target)
-    }
-
-    /// Vanilla `Mob.doHurtTarget`, callable by mobs that override
-    /// [`Mob::do_hurt_target`] to react to their hits.
-    #[must_use]
-    fn vanilla_do_hurt_target(
-        &self,
-        entity: &SharedEntity,
-        world: &World,
-        target: &SharedEntity,
-    ) -> bool {
-        let Some(attacker) = self.as_entity_event_source().as_living_entity() else {
-            return false;
-        };
-        let weapon_item = {
-            let mut main_hand = ItemStack::empty();
-            self.with_equipment_slot(EquipmentSlot::MainHand, &mut |item_stack| {
-                main_hand = item_stack.copy_with_count(item_stack.count());
-            });
-            main_hand
-        };
-        let attack_damage = self
-            .attributes()
-            .lock()
-            .required_value(vanilla_attributes::ATTACK_DAMAGE) as f32;
-        let damage_source = self.mob_attack_damage_source(&weapon_item, entity);
-        let enchantment_context = EnchantmentDamageContext::new(
-            target.entity_type(),
-            Some(self.entity_type()),
-            Some(self.entity_type()),
-            &damage_source,
-        );
-        let mut damage =
-            enchantment_helper::modify_damage(&weapon_item, &enchantment_context, attack_damage);
-        damage += ITEM_BEHAVIORS
-            .get_behavior(weapon_item.item())
-            .get_attack_damage_bonus(attacker, target.as_ref(), damage, &damage_source);
-
-        let old_movement = target.velocity();
-        let was_hurt = target.hurt(world, &damage_source, damage);
-        if was_hurt {
-            self.cause_extra_knockback(
-                target.as_ref(),
-                self.get_attack_knockback(target.as_ref(), &weapon_item, &damage_source),
-                old_movement,
-            );
-            self.with_equipment_slot_mut(EquipmentSlot::MainHand, &mut |stack| {
-                if stack.is_empty() {
-                    return;
-                }
-                if let Some(living_target) = target.as_living_entity() {
-                    ITEM_BEHAVIORS.get_behavior(stack.item()).hurt_enemy(
-                        stack,
-                        living_target,
-                        attacker,
-                    );
-                }
-            });
-            let post_attack_context = EnchantmentPostAttackContext::new(target, &damage_source);
-            enchantment_helper::do_post_attack_effects_from_item(
-                world,
-                &weapon_item,
-                &post_attack_context,
-            );
-            self.set_last_hurt_mob(Some(target));
-            self.play_attack_sound();
-        }
-
-        if let Some(user) = self.as_entity_event_source().as_living_entity() {
-            enchantment_helper::do_post_piercing_attack_effects(world, user);
-        }
-        was_hurt
+        do_hurt_target_default(self, entity, world, target)
     }
 
     /// Builds the damage source for this mob's melee attack: the weapon's
@@ -1761,12 +1715,9 @@ pub trait Mob: LivingEntity + Leashable {
             return;
         }
 
-        let y_rot = zd.atan2(xd) as f32 * RAD_TO_DEG - DEGREE_90;
-        let (_, pitch) = self.rotation();
-        self.set_rotation((
-            rotlerp(self.rotation().0, y_rot, MOVE_CONTROL_MAX_TURN),
-            pitch,
-        ));
+        let y_rot = control_degrees(trig::atan2(zd, xd)) - DEGREE_90;
+        self.base()
+            .set_y_rot(rotlerp(self.rotation().0, y_rot, MOVE_CONTROL_MAX_TURN));
         let movement_speed = self
             .attributes()
             .lock()
@@ -1788,9 +1739,7 @@ pub trait Mob: LivingEntity + Leashable {
         let mut strafe_forward = forward;
         let mut strafe_right = right;
 
-        let mut distance = strafe_forward
-            .mul_add(strafe_forward, strafe_right * strafe_right)
-            .sqrt();
+        let mut distance = (strafe_forward * strafe_forward + strafe_right * strafe_right).sqrt();
         if distance < 1.0 {
             distance = 1.0;
         }
@@ -1800,8 +1749,8 @@ pub trait Mob: LivingEntity + Leashable {
         let yaw_radians = self.rotation().0 * DEG_TO_RAD;
         let sin = trig::sin(yaw_radians);
         let cos = trig::cos(yaw_radians);
-        let dx = xa.mul_add(cos, -(za * sin));
-        let dz = za.mul_add(cos, xa * sin);
+        let dx = xa * cos - za * sin;
+        let dz = za * cos + xa * sin;
         if !self.is_strafe_walkable(dx, dz) {
             strafe_forward = 1.0;
             strafe_right = 0.0;
@@ -1847,22 +1796,22 @@ pub trait Mob: LivingEntity + Leashable {
             look_control
         };
 
-        let mut rotation = self.rotation();
-        rotation.1 = 0.0;
+        let mut pitch = 0.0;
         if look_control.is_looking_at_target() {
             let position = self.position();
             let wanted_position = look_control.wanted_position();
             let xd = wanted_position.x - position.x;
             let yd = wanted_position.y - self.get_eye_y();
             let zd = wanted_position.z - position.z;
-            let horizontal = xd.hypot(zd);
-            if horizontal.abs() > 1.0e-5 || yd.abs() > 1.0e-5 {
-                let target_pitch = -(yd.atan2(horizontal)) as f32 * RAD_TO_DEG;
-                rotation.1 =
-                    rotate_towards(rotation.1, target_pitch, look_control.x_max_rot_angle());
+            let horizontal = (xd * xd + zd * zd).sqrt();
+
+            if horizontal > LOOK_CONTROL_MIN_DELTA || yd.abs() > LOOK_CONTROL_MIN_DELTA {
+                let target_pitch = control_degrees(-trig::atan2(yd, horizontal));
+                pitch = rotate_towards(0.0, target_pitch, look_control.x_max_rot_angle());
             }
-            if zd.abs() > 1.0e-5 || xd.abs() > 1.0e-5 {
-                let target_yaw = zd.atan2(xd) as f32 * RAD_TO_DEG - DEGREE_90;
+
+            if zd.abs() > LOOK_CONTROL_MIN_DELTA || xd.abs() > LOOK_CONTROL_MIN_DELTA {
+                let target_yaw = control_degrees(trig::atan2(zd, xd)) - DEGREE_90;
                 self.set_y_head_rot(rotate_towards(
                     self.y_head_rot(),
                     target_yaw,
@@ -1873,7 +1822,7 @@ pub trait Mob: LivingEntity + Leashable {
             self.set_y_head_rot(rotate_towards(self.y_head_rot(), self.y_body_rot(), 10.0));
         }
 
-        self.set_rotation(rotation);
+        self.base().set_x_rot(pitch);
         self.clamp_head_rotation_to_body_when_pathing();
     }
 
@@ -1935,6 +1884,123 @@ pub trait Mob: LivingEntity + Leashable {
     }
 }
 
+/// Shared implementation of vanilla `Mob.doHurtTarget`, callable by mobs that
+/// extend the default attack behavior.
+pub(crate) fn do_hurt_target_default<M: Mob + ?Sized>(
+    mob: &M,
+    entity: &SharedEntity,
+    world: &World,
+    target: &SharedEntity,
+) -> bool {
+    let Some(attacker) = mob.as_entity_event_source().as_living_entity() else {
+        return false;
+    };
+    let weapon_item = {
+        let mut main_hand = ItemStack::empty();
+        mob.with_equipment_slot(EquipmentSlot::MainHand, &mut |item_stack| {
+            main_hand = item_stack.copy_with_count(item_stack.count());
+        });
+        main_hand
+    };
+    let attack_damage = mob
+        .attributes()
+        .lock()
+        .required_value(vanilla_attributes::ATTACK_DAMAGE) as f32;
+    let damage_source = mob.mob_attack_damage_source(&weapon_item, entity);
+    let enchantment_context = EnchantmentDamageContext::new(
+        target.entity_type(),
+        Some(mob.entity_type()),
+        Some(mob.entity_type()),
+        &damage_source,
+    );
+    let mut damage =
+        enchantment_helper::modify_damage(&weapon_item, &enchantment_context, attack_damage);
+    damage += ITEM_BEHAVIORS
+        .get_behavior(weapon_item.item())
+        .get_attack_damage_bonus(attacker, target.as_ref(), damage, &damage_source);
+
+    let old_movement = target.velocity();
+    let was_hurt = target.hurt(world, &damage_source, damage);
+    if was_hurt {
+        mob.cause_extra_knockback(
+            target.as_ref(),
+            mob.get_attack_knockback(target.as_ref(), &weapon_item, &damage_source),
+            old_movement,
+        );
+        mob.with_equipment_slot_mut(EquipmentSlot::MainHand, &mut |stack| {
+            if stack.is_empty() {
+                return;
+            }
+            if let Some(living_target) = target.as_living_entity() {
+                ITEM_BEHAVIORS.get_behavior(stack.item()).hurt_enemy(
+                    stack,
+                    living_target,
+                    attacker,
+                );
+            }
+        });
+        let post_attack_context = EnchantmentPostAttackContext::new(target, &damage_source);
+        enchantment_helper::do_post_attack_effects_from_item(
+            world,
+            &weapon_item,
+            &post_attack_context,
+        );
+        mob.set_last_hurt_mob(Some(target));
+        mob.play_attack_sound();
+    }
+
+    if let Some(user) = mob.as_entity_event_source().as_living_entity() {
+        enchantment_helper::do_post_piercing_attack_effects(world, user);
+    }
+    was_hurt
+}
+
+/// Shared implementation of vanilla `Mob.populateDefaultEquipmentSlots`.
+pub(crate) fn populate_default_equipment_slots_default<M: Mob + ?Sized>(
+    mob: &M,
+    difficulty: DifficultyInstance,
+) {
+    if rand::random::<f32>() >= MAX_WEARING_ARMOR_CHANCE * difficulty.special_multiplier() {
+        return;
+    }
+
+    let mut armor_type = rand::random_range(0..3);
+    for _ in 0..WEARING_ARMOR_UPGRADE_MATERIAL_ATTEMPTS {
+        if rand::random::<f32>() < WEARING_ARMOR_UPGRADE_MATERIAL_CHANCE {
+            armor_type += 1;
+        }
+    }
+
+    let partial_chance = if difficulty.difficulty() == Difficulty::Hard {
+        HARD_ARMOR_PARTIAL_CHANCE
+    } else {
+        OTHER_ARMOR_PARTIAL_CHANCE
+    };
+    let mut first = true;
+    for slot in EquipmentSlot::ARMOR_SLOTS {
+        if !first && rand::random::<f32>() < partial_chance {
+            break;
+        }
+        first = false;
+        if !mob.equipment_in_slot(slot).is_empty() {
+            continue;
+        }
+        let Some(tier) = usize::try_from(armor_type)
+            .ok()
+            .and_then(|index| VANILLA_SPAWN_ARMOR_TIERS.get(index))
+        else {
+            continue;
+        };
+        let Some(item) = tier.item_for(slot) else {
+            continue;
+        };
+        mob.living_base()
+            .equipment()
+            .lock()
+            .set(slot, ItemStack::new(item));
+    }
+}
+
 // Blanket implementation for all mobs to implement `Leashable`
 impl<T: Mob> Leashable for T {
     fn leash_data(&self) -> &SyncMutex<Option<LeashData>> {
@@ -1986,7 +2052,7 @@ fn default_attack_reach() -> f64 {
 
 fn should_jump_to_wanted_position<M: Mob + ?Sized>(mob: &M, xd: f64, yd: f64, zd: f64) -> bool {
     let max_up_step = f64::from(mob.max_up_step());
-    if yd > max_up_step && xd * xd + zd * zd < mob.bounding_box().width().max(1.0) {
+    if yd > max_up_step && xd * xd + zd * zd < f64::from(mob.base().dimensions().width.max(1.0)) {
         return true;
     }
 
@@ -2022,13 +2088,16 @@ pub fn block_pos_distance_sqr(a: BlockPos, b: BlockPos) -> f64 {
 }
 
 pub fn block_center_distance_sqr(pos: BlockPos, target: DVec3) -> f64 {
-    let (x, y, z) = pos.get_center();
-    DVec3::new(x, y, z).distance_squared(target)
+    pos.get_center().distance_squared(target)
 }
 
 fn home_radius_sqr(radius: i32) -> f64 {
     let radius = f64::from(radius);
     radius * radius
+}
+
+const fn control_degrees(radians: f64) -> f32 {
+    (radians * RAD_TO_DEG as f64) as f32
 }
 
 fn rotlerp(a: f32, b: f32, max: f32) -> f32 {

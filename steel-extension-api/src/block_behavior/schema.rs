@@ -202,6 +202,9 @@ contract::block_behavior_contract! {
         pos: core_types::BlockPos => BlockPos,
     ) -> bool => bool;
     #[must_use]
+    fn chest_sounds(
+    ) -> Option<core_types::ChestSounds> => StableOption<ChestSounds>;
+    #[must_use]
     fn trigger_event(
         state: core_types::BlockStateId => BlockState,
         world: &core_types::Arc<core_types::World> => World<'_>,
@@ -451,7 +454,7 @@ contract::block_behavior_contract! {
     #[must_use]
     fn can_be_replaced_by_fluid(
         state: core_types::BlockStateId => BlockState,
-        fluid_block: core_types::BlockRef => Block,
+        fluid: core_types::FluidRef => Fluid,
     ) -> bool => bool;
     #[must_use]
     fn place_liquid(

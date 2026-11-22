@@ -4,7 +4,7 @@ use super::super::runner::FeatureDecorationRunner;
 use smallvec::SmallVec;
 use std::f32::consts::PI;
 use std::time::Instant;
-use steel_math::trig;
+use steel_math::{round_f32, trig};
 use steel_utils::PackedSectionBlockPos;
 use steel_worldgen::state_resolver::WorldgenStateResolver;
 
@@ -37,18 +37,19 @@ impl FeatureDecorationRunner {
         let size_xz = 2 * (spread_xz_ceil + max_radius);
         let size_y = 2 * (2 + max_radius);
 
-        for x_probe in x_start..=x_start + size_xz {
-            for z_probe in z_start..=z_start + size_xz {
-                if y_start <= region.height_at(HeightmapType::OceanFloorWg, x_probe, z_probe) {
-                    return Self::do_place_ore(
-                        region, registry, random, config, x0, x1, z0, z1, y0, y1, x_start, y_start,
-                        z_start, size_xz, size_y,
-                    );
-                }
-            }
+        if !region.any_height_at_least(
+            HeightmapType::OceanFloorWg,
+            (x_start, z_start),
+            (x_start + size_xz, z_start + size_xz),
+            y_start,
+        ) {
+            return false;
         }
 
-        false
+        Self::do_place_ore(
+            region, registry, random, config, x0, x1, z0, z1, y0, y1, x_start, y_start, z_start,
+            size_xz, size_y,
+        )
     }
 
     #[expect(
@@ -347,11 +348,7 @@ impl FeatureDecorationRunner {
         random: &mut WorldgenRandom,
         max_distance: i32,
     ) -> i32 {
-        Self::java_round_f32((random.next_f32() - random.next_f32()) * max_distance as f32)
-    }
-
-    pub(in crate::worldgen::feature) fn java_round_f32(value: f32) -> i32 {
-        (value + 0.5).floor() as i32
+        round_f32((random.next_f32() - random.next_f32()) * max_distance as f32)
     }
 
     fn try_place_resolved_ore_block(

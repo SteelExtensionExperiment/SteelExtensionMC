@@ -27,6 +27,7 @@ pub use steel_registry::{
     entity_type::EntityTypeRef,
     fluid::{FluidRef, FluidState},
     item_stack::ItemStack,
+    sound_event::SoundEventRef,
 };
 pub use steel_utils::{
     BlockPos, BlockStateId,
@@ -41,5 +42,6 @@ pub use simdnbt::{borrow::BaseNbtCompound as BorrowedNbtCompound, owned::NbtComp
 pub use steel_core::{block_entity::BlockEntityBase, inventory::lock::ContainerRef};
 
 pub type ExplosionDropConsumer<'a> = dyn FnMut(ItemStack, BlockPos) + 'a;
+pub type ChestSounds = (SoundEventRef, SoundEventRef);
 
 pub use simdnbt::owned::NbtTag;

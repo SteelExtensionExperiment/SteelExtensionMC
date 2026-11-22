@@ -18,6 +18,7 @@ pub use persistence::{EntityBaseLoad, EntityBaseSaveData};
 pub use relationships::PendingWorldChangeToken;
 use relationships::{EntityLifecycleState, EntityRelationshipState};
 
+use std::mem::take;
 use std::sync::{Arc, Weak};
 
 use crate::entity::custom_data::CustomData;
@@ -85,6 +86,12 @@ pub(crate) struct EntityPhysicsStateInput {
     pub(crate) descending: bool,
     pub(crate) can_walk_on_powder_snow: bool,
     pub(crate) is_falling_block: bool,
+}
+
+pub(crate) struct EntityPushState {
+    pub(crate) position: DVec3,
+    pub(crate) no_physics: bool,
+    pub(crate) is_vehicle: bool,
 }
 
 #[derive(Debug, Default)]
@@ -238,6 +245,8 @@ pub struct EntityBaseState {
     fall_distance: f64,
     stuck_speed_multiplier: DVec3,
     no_physics: bool,
+    predicted_movement: DVec3,
+    sync_position: bool,
     needs_velocity_sync: bool,
     hurt_marked: bool,
     requires_precise_position: bool,
@@ -273,6 +282,8 @@ impl EntityBaseState {
             fall_distance: 0.0,
             stuck_speed_multiplier: DVec3::ZERO,
             no_physics: false,
+            predicted_movement: DVec3::ZERO,
+            sync_position: false,
             needs_velocity_sync: false,
             hurt_marked: false,
             requires_precise_position: false,
@@ -732,6 +743,27 @@ impl EntityBase {
         self.state.lock().no_physics
     }
 
+    /// Reads the push inputs under one lock, or `None` while riding so the caller
+    /// falls back to the regular push callbacks.
+    pub(crate) fn unmounted_push_state(&self) -> Option<EntityPushState> {
+        let mut relationships = self.relationships.lock();
+
+        if relationships.vehicle().is_some() {
+            return None;
+        }
+
+        let is_vehicle = relationships.first_passenger().is_some();
+        drop(relationships);
+
+        let state = self.state.lock();
+
+        Some(EntityPushState {
+            position: state.position,
+            no_physics: state.no_physics,
+            is_vehicle,
+        })
+    }
+
     /// Returns this entity's current air supply in ticks.
     #[inline]
     pub fn air_supply(&self) -> i32 {
@@ -830,6 +862,22 @@ impl EntityBase {
     /// Sets whether tracker movement sync must send a full position packet.
     pub fn set_requires_precise_position(&self, requires_precise_position: bool) {
         self.state.lock().requires_precise_position = requires_precise_position;
+    }
+
+    pub(crate) fn record_predicted_movement(&self, movement: DVec3) {
+        self.state.lock().predicted_movement += movement;
+    }
+
+    pub(crate) fn mark_position_for_interpolation(&self) {
+        self.state.lock().sync_position = true;
+    }
+
+    pub(crate) fn take_movement_interpolation(&self) -> (DVec3, bool) {
+        let mut state = self.state.lock();
+        (
+            take(&mut state.predicted_movement),
+            take(&mut state.sync_position),
+        )
     }
 
     /// Gets the world this entity is in.
@@ -1266,11 +1314,35 @@ impl EntityBase {
         }
     }
 
+    /// Vanilla `push(double, double, double)` under one lock: a non-finite impulse is
+    /// ignored, and a non-finite sum keeps the old velocity like `setDeltaMovement`
+    /// while still marking the velocity for sync.
+    pub(crate) fn push_impulse(&self, impulse: DVec3) {
+        if !impulse.is_finite() {
+            return;
+        }
+
+        let mut state = self.state.lock();
+        let velocity = state.velocity + impulse;
+
+        if velocity.is_finite() {
+            state.velocity = velocity;
+        }
+
+        state.needs_velocity_sync = true;
+    }
+
     /// Advances this entity's tick counter by one.
     #[inline]
     pub fn advance_tick_count(&self) {
         let mut state = self.state.lock();
         state.tick_count = state.tick_count.wrapping_add(1);
+    }
+
+    /// Sets this entity's tick counter, for entities that persist it.
+    #[inline]
+    pub fn set_tick_count(&self, tick_count: i32) {
+        self.state.lock().tick_count = tick_count;
     }
 
     /// Records movement distance used by vanilla step, swim, and flap effects.
@@ -1315,6 +1387,16 @@ impl EntityBase {
     /// Sets the entity's rotation as (yaw, pitch) in degrees.
     pub fn set_rotation(&self, rotation: (f32, f32)) {
         self.state.lock().rotation = normalize_rotation(rotation);
+    }
+
+    pub(crate) fn set_y_rot(&self, yaw: f32) {
+        assert!(yaw.is_finite(), "entity yaw must be finite: {yaw:?}");
+        self.state.lock().rotation.0 = yaw;
+    }
+
+    pub(crate) fn set_x_rot(&self, pitch: f32) {
+        assert!(pitch.is_finite(), "entity pitch must be finite: {pitch:?}");
+        self.state.lock().rotation.1 = (pitch % DEGREE_360).clamp(-DEGREE_90, DEGREE_90);
     }
 
     /// Sets whether this entity bypasses collision physics.

@@ -44,6 +44,8 @@ pub struct ClientFluid {
     pub source: FluidRef,
     pub flowing: FluidRef,
     pub block: BlockRef,
+    /// The registered filled bucket, when this fluid can be picked up.
+    pub bucket: Option<ItemRef>,
     /// The vanilla source fluid clients see (`minecraft:water` or `minecraft:lava`).
     pub client_source: FluidRef,
     /// The vanilla flowing variant of `client_source`.
@@ -111,10 +113,6 @@ impl Registry {
             } else {
                 (&vanilla_blocks::LAVA, &vanilla_fluids::FLOWING_LAVA)
             };
-        let bucket_key = bucket.as_ref().map_or_else(
-            || Identifier::vanilla_static("air"),
-            |(item, _)| item.key.clone(),
-        );
         let fluid = |key: &Identifier, is_source: bool| -> FluidRef {
             Box::leak(Box::new(Fluid {
                 key: key.clone(),
@@ -122,7 +120,6 @@ impl Registry {
                 is_source,
                 is_randomly_ticking: randomly_ticking,
                 block: block_key.clone(),
-                bucket_item: bucket_key.clone(),
                 source_fluid: Some(source_key.clone()),
                 flowing_fluid: Some(flowing_key.clone()),
                 tick_delay: u32::from(spread.tick_delay),
@@ -171,10 +168,9 @@ impl Registry {
                 self_drop: None,
             },
         );
-        if let Some((item, fallback)) = bucket {
-            // Validated with the rest of the definition above.
-            self.register_client_item(item, fallback)?;
-        }
+        let bucket = bucket
+            .map(|(item, fallback)| self.register_client_item(item, fallback))
+            .transpose()?;
 
         let tint_index = tint.map(|_| {
             let index = self.client_content.tinting_fluid_count;
@@ -185,6 +181,7 @@ impl Registry {
             source,
             flowing,
             block,
+            bucket,
             client_source,
             client_flowing,
             tint,
@@ -330,12 +327,10 @@ mod tests {
         assert_eq!(entry.flowing.source_fluid, Some(entry.source.key.clone()));
         assert!(entry.source.is_randomly_ticking);
         assert_eq!(entry.source.block, entry.block.key);
-        assert_eq!(
-            entry.source.bucket_item,
-            Identifier::new("fluid_test", "sludge_bucket")
-        );
+        let bucket = entry.bucket.ok_or("bucket missing")?;
+        assert_eq!(bucket.key, Identifier::new("fluid_test", "sludge_bucket"));
         assert_eq!(entry.tint_index, Some(0));
-        assert!(registry.items.by_key(&entry.source.bucket_item).is_some());
+        assert_eq!(registry.items.by_key(&bucket.key), Some(bucket));
         assert!(std::ptr::eq(
             registry
                 .blocks

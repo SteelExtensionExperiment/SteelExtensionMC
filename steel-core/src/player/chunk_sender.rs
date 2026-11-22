@@ -527,6 +527,7 @@ pub mod benchmark_support {
             Weak::new(),
             BlockTickList::new(),
             FluidTickList::new(),
+            0,
             ChunkHeightmaps::new(0, 16),
             Vec::new(),
             StructureStartMap::default(),

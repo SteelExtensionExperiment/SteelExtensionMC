@@ -3,7 +3,7 @@ use crate::chunk::block_attachment::BlockAttachment;
 use std::fmt::{self, Formatter};
 use std::sync::{
     Arc, OnceLock, Weak,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicI64, Ordering},
 };
 
 use parking_lot::{RwLockReadGuard, RwLockWriteGuard};
@@ -83,6 +83,8 @@ pub struct Chunk {
     /// Whether the chunk has been modified since last save.
     /// Newly generated chunks start dirty.
     pub dirty: AtomicBool,
+    /// Total game ticks this chunk spent as a natural-spawn candidate.
+    inhabited_time: AtomicI64,
     /// Heightmaps retained across every generation phase.
     pub(crate) heightmaps: SyncRwLock<ChunkHeightmaps>,
     /// The minimum Y coordinate of the world this chunk belongs to.
@@ -133,6 +135,7 @@ impl Chunk {
             block_attachments: SyncMutex::new(FxHashMap::default()),
             pos,
             dirty: AtomicBool::new(true), // New chunks are always dirty
+            inhabited_time: AtomicI64::new(0),
             heightmaps: SyncRwLock::new(ChunkHeightmaps::empty()),
             min_y,
             height,
@@ -177,6 +180,7 @@ impl Chunk {
         postprocessing: Vec<Vec<u16>>,
         block_ticks: BlockTickList,
         fluid_ticks: FluidTickList,
+        inhabited_time: i64,
         level: Weak<World>,
         mut light: ChunkLightData,
     ) -> Self {
@@ -189,6 +193,7 @@ impl Chunk {
             block_attachments: SyncMutex::new(FxHashMap::default()),
             pos,
             dirty: AtomicBool::new(false),
+            inhabited_time: AtomicI64::new(inhabited_time),
             heightmaps: SyncRwLock::new(heightmaps),
             min_y,
             height,
@@ -265,6 +270,17 @@ impl Chunk {
     /// Clears the dirty flag.
     pub fn clear_dirty(&self) {
         self.dirty.store(false, Ordering::Release);
+    }
+
+    /// Returns the total game ticks this chunk spent as a natural-spawn candidate.
+    #[must_use]
+    pub fn inhabited_time(&self) -> i64 {
+        self.inhabited_time.load(Ordering::Acquire)
+    }
+
+    /// Adds one tick of inhabited time.
+    pub fn increment_inhabited_time(&self) {
+        self.inhabited_time.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Reads a block using coordinates relative to the chunk's minimum Y.
@@ -1541,6 +1557,7 @@ mod tests {
         );
         let moving_pos = BlockPos::new(2, 4, 5);
         let chest_pos = BlockPos::new(3, 4, 5);
+        let unimplemented_pos = BlockPos::new(4, 4, 5);
         assert!(
             proto
                 .set_block_state_for_generation(
@@ -1561,20 +1578,42 @@ mod tests {
                 )
                 .is_some()
         );
+        assert!(
+            proto
+                .set_block_state_for_generation(
+                    ChunkStatus::Empty,
+                    unimplemented_pos,
+                    vanilla_blocks::COPPER_CHEST.default_state(),
+                    UpdateFlags::UPDATE_NONE,
+                )
+                .is_some()
+        );
         proto.set_pending_block_entity(moving_pos);
         proto.set_pending_block_entity(chest_pos);
+        proto.set_pending_block_entity(unimplemented_pos);
 
         assert!(proto.promote_pending_block_entity(moving_pos).is_none());
-        assert!(proto.promote_pending_block_entity(chest_pos).is_none());
+        assert!(proto.promote_pending_block_entity(chest_pos).is_some());
+        assert!(
+            proto
+                .promote_pending_block_entity(unimplemented_pos)
+                .is_none()
+        );
         let pending = proto.pending_block_entity_positions();
         assert!(pending.contains(&moving_pos));
-        assert!(pending.contains(&chest_pos));
+        assert!(!pending.contains(&chest_pos));
+        assert!(pending.contains(&unimplemented_pos));
 
         let full = proto.promote_to_full().chunk;
         assert!(full.get_block_entity(moving_pos).is_none());
         assert!(!full.pending_block_entity_positions().contains(&moving_pos));
-        assert!(full.get_block_entity(chest_pos).is_none());
-        assert!(full.pending_block_entity_positions().contains(&chest_pos));
+        assert!(full.get_block_entity(chest_pos).is_some());
+        assert!(!full.pending_block_entity_positions().contains(&chest_pos));
+        assert!(full.get_block_entity(unimplemented_pos).is_none());
+        assert!(
+            full.pending_block_entity_positions()
+                .contains(&unimplemented_pos)
+        );
     }
 
     #[test]

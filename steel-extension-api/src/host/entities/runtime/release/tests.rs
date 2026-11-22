@@ -25,7 +25,6 @@ fn stored_release_preserves_native_state_frees_slot_and_enables_chunk_saving() -
     let entity = ENTITIES
         .create(
             &vanilla_entities::SHEEP,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, 8.5),
             Arc::downgrade(world),
         )
@@ -97,7 +96,6 @@ fn blocked_release_retains_the_saved_entity() -> Result<(), String> {
     let entity = ENTITIES
         .create(
             &vanilla_entities::SHEEP,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, 8.5),
             Arc::downgrade(world),
         )
@@ -140,7 +138,6 @@ fn active_release_keeps_the_same_world_entity() -> Result<(), String> {
     let entity = ENTITIES
         .create(
             &vanilla_entities::SHEEP,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, 8.5),
             Arc::downgrade(world),
         )

@@ -10,6 +10,7 @@ use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{
     BellAttachType, BlockStateProperties, BoolProperty, Direction, EnumProperty,
 };
+use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_custom_stats::BELL_RING;
 use steel_registry::{
     sound_events, vanilla_block_entity_types, vanilla_blocks, vanilla_game_events,
@@ -27,6 +28,7 @@ use crate::entity::Entity;
 use crate::entity::ai::path::PathComputationType;
 use crate::entity::projectile::Projectile;
 use crate::player::Player;
+use crate::world::explosion::Explosion;
 use crate::world::game_event::GameEventContext;
 use crate::world::{ClipHitResult, LevelReader, ScheduledTickAccess, SignalGetter as _, World};
 
@@ -56,7 +58,11 @@ impl BellBlock {
         }
     }
 
-    fn has_support(world: &dyn LevelReader, pos: BlockPos, direction: Direction) -> bool {
+    fn has_support(
+        world: &(impl LevelReader + ?Sized),
+        pos: BlockPos,
+        direction: Direction,
+    ) -> bool {
         let support_pos = pos.relative(direction);
         let support = world.get_block_state(support_pos);
 
@@ -271,6 +277,21 @@ impl BlockBehavior for BellBlock {
             .as_deref()
             .filter(|entity| entity.as_player().is_some());
         Self::ring(source, world, hit.block_pos, hit.direction);
+    }
+
+    fn on_explosion_hit(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        explosion: &dyn Explosion,
+        on_hit: &mut dyn FnMut(ItemStack, BlockPos),
+    ) {
+        if explosion.can_trigger_blocks() {
+            Self::ring(None, world, pos, state.get_value(FACING));
+        }
+
+        self.default_on_explosion_hit(state, world, pos, explosion, on_hit);
     }
 
     fn new_block_entity(

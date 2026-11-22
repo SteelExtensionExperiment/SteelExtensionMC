@@ -5,7 +5,8 @@ pub mod api {
     #[cfg(feature = "host")]
     use crate::block_behavior::core_types::BonemealAction as NativeBonemealAction;
     use crate::block_behavior::types::{
-        BlockInteraction, DamageSourceRef, Entity, Explosion, ExplosionDropConsumer, Vector3,
+        BlockInteraction, ChestSounds, DamageSourceRef, Entity, Explosion, ExplosionDropConsumer,
+        Vector3,
     };
     use crate::block_behavior::types::{BonemealAction, Inventory, ItemStack, Player};
     use crate::{ApiResult, BlockState};
@@ -30,6 +31,24 @@ pub mod api {
                         .get_property_str(BlockStateId(self.id), name.as_str())
                 })
                 .map(ApiString::from)
+                .into()
+        }
+    }
+
+    impl ChestSounds {
+        /// Selects the registered sounds played when a chest opens and closes.
+        #[must_use]
+        pub fn from_keys(open: Str<'_>, close: Str<'_>) -> ApiResult<Self> {
+            let sound_by_key = |key: Str<'_>| {
+                let key = key.as_str().parse::<Identifier>()?;
+                REGISTRY
+                    .sound_events
+                    .by_key(&key)
+                    .ok_or_else(|| format!("unknown sound event {key}"))
+            };
+            sound_by_key(open)
+                .and_then(|open| sound_by_key(close).map(|close| Self::from_host((open, close))))
+                .map_err(ApiString::from)
                 .into()
         }
     }

@@ -219,10 +219,12 @@ impl FullChunkRef<'_> {
 
             for _ in 0..random_tick_speed {
                 let (local_x, local_y, local_z) = random_positions.next_local();
-                let state = section_guard
+                let Some(state) = section_guard
                     .get_or_insert_with(|| section.read())
-                    .states()
-                    .get(local_x, local_y, local_z);
+                    .random_tick_sample(local_x, local_y, local_z)
+                else {
+                    continue;
+                };
                 let Some((tick_block, tick_fluid)) = random_tick_kinds(state) else {
                     continue;
                 };
@@ -337,6 +339,7 @@ impl Chunk {
     /// * `level` - Weak reference to the world (mirrors Java's `LevelChunk.level`)
     /// * `block_ticks` - Scheduled block ticks loaded from disk
     /// * `fluid_ticks` - Scheduled fluid ticks loaded from disk
+    /// * `inhabited_time` - Accumulated natural-spawn candidate ticks loaded from disk
     /// * `heightmaps` - Heightmaps loaded from disk
     /// * `postprocessing` - Pending postprocessing offsets loaded from disk
     /// * `light` - Chunk-owned light data loaded from disk
@@ -357,6 +360,7 @@ impl Chunk {
         level: Weak<World>,
         block_ticks: BlockTickList,
         fluid_ticks: FluidTickList,
+        inhabited_time: i64,
         mut heightmaps: ChunkHeightmaps,
         postprocessing: Vec<Vec<u16>>,
         structure_starts: StructureStartMap,
@@ -385,6 +389,7 @@ impl Chunk {
             postprocessing,
             block_ticks,
             fluid_ticks,
+            inhabited_time,
             Weak::clone(&level),
             light,
         );

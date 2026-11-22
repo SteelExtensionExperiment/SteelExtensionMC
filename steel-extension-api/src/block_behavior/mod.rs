@@ -22,11 +22,11 @@ use std::sync::Arc;
 use types::{
     Block, BlockEntity, BlockEntityBorrow, BlockEntityCreation, BlockEntityRef, BlockEntityTicker,
     BlockEntityType, BlockHit, BlockLootContext, BlockPlaceContext, BonemealableRef, BrushableData,
-    ClipHit, CollisionBoxes, CollisionContext, Direction, DyeColor, Entity, EntityType, Explosion,
-    ExplosionDropConsumer, FallDamage, FallDamageRef, FallOnContext, FallableRef, Fluid,
-    FluidState, GameEventListener, GrowingPlantHeadRef, InsideBlockEffects, InteractionHand,
-    Inventory, ItemStack, ItemStackRef, ItemStacks, LandingContext, LevelAccessor, LevelReader,
-    PathComputationType, PickupResult, PlacementSource, Player, Projectile, RailRef,
+    ChestSounds, ClipHit, CollisionBoxes, CollisionContext, Direction, DyeColor, Entity,
+    EntityType, Explosion, ExplosionDropConsumer, FallDamage, FallDamageRef, FallOnContext,
+    FallableRef, Fluid, FluidState, GameEventListener, GrowingPlantHeadRef, InsideBlockEffects,
+    InteractionHand, Inventory, ItemStack, ItemStackRef, ItemStacks, LandingContext, LevelAccessor,
+    LevelReader, PathComputationType, PickupResult, PlacementSource, Player, Projectile, RailRef,
     ScheduledTickAccess, SignalQueryContext, SupportType, UpdateFlags, Vector3, VoxelShape,
     WeakWorld,
 };

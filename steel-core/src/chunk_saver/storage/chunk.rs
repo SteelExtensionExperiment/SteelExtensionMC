@@ -438,6 +438,7 @@ impl ChunkStorage {
                 Weak::clone(&level),
                 block_ticks,
                 fluid_ticks,
+                persistent.inhabited_time,
                 heightmaps,
                 persistent.postprocessing.iter().map(Vec::clone).collect(),
                 structure_starts,
@@ -515,6 +516,7 @@ impl ChunkStorage {
                 persistent.postprocessing.iter().map(Vec::clone).collect(),
                 block_ticks,
                 fluid_ticks,
+                persistent.inhabited_time,
                 Weak::clone(&level),
                 light,
             );

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use glam::DVec3;
 use steel_core::entity::entities::mobs::extension::{MobHookRegistry, MobHooks};
-use steel_core::entity::{ENTITIES, Entity as CoreEntity, SharedEntity, next_entity_id};
+use steel_core::entity::{ENTITIES, Entity as CoreEntity, SharedEntity};
 use steel_core::world::World as CoreWorld;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::{REGISTRY, RegistryExt as _};
@@ -72,12 +72,7 @@ pub(crate) fn spawn_entity(
     }
     let position = DVec3::new(position.x, position.y, position.z);
     let entity: SharedEntity = ENTITIES
-        .create(
-            entity_type,
-            next_entity_id(),
-            position,
-            Arc::downgrade(world),
-        )
+        .create(entity_type, position, Arc::downgrade(world))
         .ok_or_else(|| format!("Steel cannot create {} yet", entity_type.key))?;
     let uuid = entity.uuid();
     world

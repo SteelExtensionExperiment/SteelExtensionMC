@@ -9,12 +9,13 @@ use steel_registry::entity_data::EntityPose;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::{REGISTRY, RegistryExt};
+use steel_utils::nbt::NbtValueInput as _;
 use steel_utils::nbt::{NbtNumeric, merge_nbt_compounds, nbt_collection_values};
 use steel_utils::{BlockPos, Identifier, UuidExt, WorldAabb, axis::Axis, types::Difficulty};
 use text_components::TextComponent;
 use uuid::Uuid;
 
-use super::{AddEntityError, CustomData, ENTITIES, SharedEntity, next_entity_id};
+use super::{AddEntityError, CustomData, ENTITIES, SharedEntity};
 use crate::entity::entity::{read_nbt_dvec3, read_nbt_rotation, sanitize_nbt_motion};
 use crate::entity::{EntityBaseSaveData, EntityFireFreezeState, EntityLoadRequest};
 use crate::physics::{CollisionWorld, WorldCollisionProvider, collide};
@@ -130,12 +131,7 @@ pub(crate) fn create_entity_instance(
     }
 
     ENTITIES
-        .create(
-            entity_type,
-            next_entity_id(),
-            position,
-            Arc::downgrade(world),
-        )
+        .create(entity_type, position, Arc::downgrade(world))
         .ok_or(EntitySpawnError::MissingFactory)
 }
 
@@ -224,7 +220,7 @@ fn load_entity_recursive_inner(
         fall_distance: nbt
             .get("fall_distance")
             .and_then(|tag| tag.codec_f64())
-            .or_else(|| nbt.double("FallDistance"))
+            .or_else(|| nbt.double_value("FallDistance"))
             .unwrap_or(0.0),
         fire_freeze: EntityFireFreezeState::from_parts(
             nbt.get("Fire")
@@ -417,7 +413,8 @@ pub(crate) fn spawn_entity(
     {
         mob.set_y_head_rot(rotation.0);
         mob.set_y_body_rot(rotation.0);
-        let _ = mob.finalize_spawn(world, request.reason, None);
+        let difficulty = world.get_current_difficulty_at(entity.block_position());
+        let _ = mob.finalize_spawn(world, difficulty, request.reason, None);
     }
 
     if let Some(item_stack) = request.item_stack {

@@ -1,7 +1,7 @@
 use std::{f32::consts::TAU, mem, sync::Arc};
 
 use crate::{
-    entity::{Entity, LivingEntity as _, RemovalReason, entities::ItemEntity},
+    entity::{ContainerUser, Entity, LivingEntity as _, RemovalReason, entities::ItemEntity},
     inventory::{
         click::Click,
         container::{Container, CraftingContainer, clear_or_count_matching_stack},
@@ -81,6 +81,7 @@ impl Player {
         open_menu.dispatch = Some(OpenMenuDispatch {
             container_id,
             overrides_player_slots,
+            opened_containers: menu.kind().opened_containers(),
             actions: Vec::new(),
         });
         Ok(menu)
@@ -252,20 +253,29 @@ impl Player {
         self.finish_open_menu_callback(menu);
     }
 
-    /// Handles a container button click packet (e.g., enchanting table buttons).
+    /// Dispatches a container button click to the open menu.
     pub fn handle_container_button_click(&self, packet: SContainerButtonClick) {
-        log::debug!(
-            "Player {} clicked button {} in container {}",
-            self.gameprofile.name(),
-            packet.button_id,
-            packet.container_id
-        );
-        // TODO: Implement container button click handling
-        // This is used for things like:
-        // - Enchanting table level selection
-        // - Stonecutter recipe selection
-        // - Loom pattern selection
-        // - Lectern page turning
+        self.reset_last_action_time();
+        match self.take_open_menu_for_callback(Some(packet.container_id)) {
+            Ok(mut menu) => {
+                if self.game_mode() == GameType::Spectator {
+                    // Spectator button clicks are ignored without resynchronizing the menu.
+                } else if !menu.still_valid(self) {
+                    log::debug!(
+                        "Player {} interacted with invalid menu {}",
+                        self.gameprofile.name(),
+                        packet.container_id
+                    );
+                } else if menu.click_menu_button(packet.button_id, self) {
+                    menu.behavior_mut().broadcast_changes(&self.connection);
+                }
+                self.finish_open_menu_callback(menu);
+            }
+            Err(OpenMenuUnavailable::Closed) => {
+                log::debug!("container button click without an open menu");
+            }
+            Err(OpenMenuUnavailable::Unavailable) => {}
+        }
     }
 
     /// Handles a container click packet (slot interaction).
@@ -550,10 +560,9 @@ impl Player {
     /// Set the selected advancement
     pub fn handle_seen_advancement(&self, packet: SSeenAdvancement) {
         if let Opened(tab_id) = packet {
-            let advancement = REGISTRY.advancements.value_by_key(&tab_id);
-            if advancement.is_some() {
-                self.advancements.lock().set_selected_tab(self, advancement);
-            }
+            REGISTRY.advancements.with_value_by_key(&tab_id, |adv| {
+                self.advancements.lock().set_selected_tab(self, Some(adv));
+            });
         }
     }
 
@@ -697,6 +706,7 @@ impl Player {
             open_menu.dispatch = Some(OpenMenuDispatch {
                 container_id: menu.container_id(),
                 overrides_player_slots: menu.overrides_player_slots(),
+                opened_containers: menu.kind().opened_containers(),
                 actions: Vec::new(),
             });
             break;
@@ -874,6 +884,7 @@ impl Player {
             open_menu.dispatch = Some(OpenMenuDispatch {
                 container_id: menu.container_id(),
                 overrides_player_slots: menu.overrides_player_slots(),
+                opened_containers: menu.kind().opened_containers(),
                 actions: Vec::new(),
             });
             menu
@@ -1191,8 +1202,7 @@ impl Player {
     /// Returns false if the player is dead, removed, or has a flag preventing item drops.
     #[must_use]
     pub fn can_drop_items(&self) -> bool {
-        !self.is_removed()
-        // TODO: Check if player is alive (health > 0)
+        Entity::is_alive(self)
     }
 
     /// Returns whether items from a closing menu (crafting grid, anvil inputs,
@@ -1288,5 +1298,22 @@ impl Player {
         if should_drop {
             let _ = guard.run_unlocked(|| self.drop_item(item, false, prediction));
         }
+    }
+}
+
+impl ContainerUser for Player {
+    fn has_container_open_for(&self, container: ContainerId) -> bool {
+        let state = self.open_menu.lock();
+        if let Some(menu) = &state.menu {
+            return menu.kind().opened_containers().contains(&container);
+        }
+        state
+            .dispatch
+            .as_ref()
+            .is_some_and(|dispatch| dispatch.opened_containers.contains(&container))
+    }
+
+    fn container_interaction_range(&self) -> f64 {
+        self.block_interaction_range()
     }
 }

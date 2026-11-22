@@ -68,6 +68,7 @@ host_value!(
     BlockEntityType = core_types::BlockEntityTypeRef
 );
 host_value!(block_storage, Block = core_types::BlockRef);
+host_value!(chest_sounds_storage, ChestSounds = core_types::ChestSounds);
 host_value!(vector3_storage, Vector3 = core_types::DVec3);
 host_value!(direction_storage, Direction = core_types::Direction);
 host_value!(fall_on_context_storage, FallOnContext<'a> = core_types::EntityFallOnContext<'a>);

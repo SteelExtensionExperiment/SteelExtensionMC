@@ -109,6 +109,12 @@ impl SteelServer {
     ) -> Result<Self, SteelServerError> {
         log::info!("Starting Steel Server ({GIT_HASH_SHORT})");
 
+        if steel_config.server.simulation_distance < 4 {
+            tracing::warn!(
+                "Simulation distance is lesser than 4, this can result in incorrect or alternate behavior!"
+            );
+        }
+
         let mut hooks = ExtensionHooks::default();
         let data_root = Path::new(EXTENSION_DIRECTORY);
         let mut sources = Vec::with_capacity(steel_config.extensions.len());

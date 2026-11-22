@@ -20,6 +20,7 @@
 /extensions
 /.tmp
 /.logs
+/debug
 /world
 /saves
 /players
@@ -54,3 +55,5 @@ rustc-ice-*
 .DS_STORE
 .gitcraft-tmp/
 /.vs
+
+/steel-core/src/loot/generated

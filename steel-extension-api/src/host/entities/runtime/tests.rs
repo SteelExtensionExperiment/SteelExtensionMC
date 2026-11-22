@@ -24,7 +24,6 @@ fn store_deploy_recall_preserves_native_identity_health_and_dependency_fields() 
     let cow = ENTITIES
         .create(
             &vanilla_entities::COW,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, 8.5),
             Arc::downgrade(world),
         )
@@ -134,7 +133,6 @@ fn corrupted_dependency_parent_refuses_a_player_snapshot_instead_of_losing_the_e
     let cow = ENTITIES
         .create(
             &vanilla_entities::COW,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, 8.5),
             Arc::downgrade(world),
         )
@@ -176,7 +174,6 @@ fn native_snapshot_restores_attributes_absorption_and_hidden_effects_without_rea
     let cow = ENTITIES
         .create(
             &vanilla_entities::COW,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, 8.5),
             Arc::downgrade(world),
         )
@@ -265,7 +262,6 @@ fn replacement_conversion_after_respawn_keeps_one_owned_entity_and_recalls_the_n
     let mooshroom = ENTITIES
         .create(
             &vanilla_entities::MOOSHROOM,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, 8.5),
             Arc::downgrade(world),
         )

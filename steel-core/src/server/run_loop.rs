@@ -11,10 +11,14 @@ use super::{
     SuggestionError, Suggestions, TAB_LIST_UPDATE_INTERVAL, TabListTickStats, ThreadPool, World,
     command_suggestions_packet, sleep, spawn_blocking,
 };
-
-use steel_registry::vanilla_custom_stats;
+use crate::command::signing_context::CommandSigningContext;
+use crate::entity::Entity;
+use steel_protocol::packets::game::ChatTypeBound;
+use steel_registry::{RegistryEntry, vanilla_chat_types, vanilla_custom_stats};
 use steel_utils::threading::{available_worker_threads, worker_threads_for_available};
 use steel_utils::translations;
+
+use crate::world::WorldGameTickTimings;
 
 impl Server {
     pub(super) fn advance_server_tick(&self) -> (u64, bool) {
@@ -140,6 +144,10 @@ impl Server {
         match command_data.storage {
             Ok(saved) => log::info!("Saved {saved} domain command storages"),
             Err(error) => log::error!("Failed to save domain command storage: {error}"),
+        }
+        match command_data.random_sequences {
+            Ok(saved) => log::info!("Saved {saved} domain random-sequence collections"),
+            Err(error) => log::error!("Failed to save domain random sequences: {error}"),
         }
         let mut total_saved = 0;
         for world in self.worlds.values() {
@@ -269,14 +277,17 @@ impl Server {
                 cancel_token.cancel();
                 break;
             }
-            if let Err(error) = self
+            let world_timings = match self
                 .tick_worlds_game(&world_tick_workers, tick_count, runs_normally)
                 .await
             {
-                log::error!("World game tick failed: {error}");
-                cancel_token.cancel();
-                break;
-            }
+                Ok(timings) => timings,
+                Err(error) => {
+                    log::error!("World game tick failed: {error}");
+                    cancel_token.cancel();
+                    break;
+                }
+            };
             player_info_ticks += 1;
             if player_info_ticks > SEND_PLAYER_INFO_INTERVAL {
                 let _span = tracing::trace_span!("broadcast_latency").entered();
@@ -300,10 +311,18 @@ impl Server {
                 &mut command_data_autosaves,
             );
 
-            let tab_list_tick_stats = self.record_tick_and_capture_tab_stats(
-                tick_count,
-                tick_start.elapsed().as_nanos() as u64,
-            );
+            let tick_elapsed = tick_start.elapsed();
+            let tab_list_tick_stats =
+                self.record_tick_and_capture_tab_stats(tick_count, tick_elapsed.as_nanos() as u64);
+            if let Some(completed) = self.perf.record_tick(
+                tick_elapsed,
+                self.worlds
+                    .values()
+                    .map(|world| &world.key)
+                    .zip(world_timings),
+            ) {
+                completed.finish(&self);
+            }
 
             if let Some(tick_stats) = tab_list_tick_stats {
                 self.broadcast_tab_list(tick_stats);
@@ -361,6 +380,10 @@ impl Server {
             Ok(saved) => tracing::debug!(saved, "Domain command-storage autosave completed"),
             Err(error) => tracing::error!(%error, "Domain command-storage autosave failed"),
         }
+        match results.random_sequences {
+            Ok(saved) => tracing::debug!(saved, "Domain random-sequence autosave completed"),
+            Err(error) => tracing::error!(%error, "Domain random-sequence autosave failed"),
+        }
     }
 
     fn tick_command_data_autosave(
@@ -402,7 +425,7 @@ impl Server {
         }
     }
 
-    fn tick_command_requests(
+    pub(super) fn tick_command_requests(
         self: &Arc<Self>,
         pending: &mut PendingCommandExecutionQueue<CommandSource>,
     ) {
@@ -417,11 +440,41 @@ impl Server {
             handled += 1;
 
             match request {
-                CommandRequest::Execute { owner, command } => {
+                CommandRequest::Execute {
+                    owner,
+                    command,
+                    signing_context,
+                } => {
                     if !owner.is_current(self) {
                         continue;
                     }
-                    self.execute_command_request(pending, owner, &command);
+                    self.execute_command_request(pending, owner, &command, signing_context);
+                }
+                CommandRequest::Chat { owner, message } => {
+                    if owner.is_current(self)
+                        && let Some(player) = owner.sender().get_player()
+                    {
+                        let chat_type = ChatTypeBound::new(
+                            vanilla_chat_types::CHAT.id() as i32,
+                            player.display_name(),
+                        );
+                        self.broadcast_chat(&message, &chat_type);
+                        player.detect_chat_rate_spam();
+                    }
+                }
+                CommandRequest::ChatSessionUpdate {
+                    owner,
+                    session,
+                    transition,
+                } => {
+                    if let Some(player) = owner.sender().get_player()
+                        && let Some(current_player) = player.session.current_player()
+                        && !current_player.connection.closed()
+                    {
+                        current_player.set_chat_session(*session);
+                    }
+
+                    self.finish_player_packet_transition(transition);
                 }
                 CommandRequest::Suggestions {
                     owner,
@@ -450,8 +503,10 @@ impl Server {
         pending: &mut PendingCommandExecutionQueue<CommandSource>,
         owner: CommandExecutionOwner,
         command: &str,
+        signing_context: Option<CommandSigningContext>,
     ) {
-        let source = CommandSource::new(owner.sender().clone(), Arc::clone(self));
+        let source = CommandSource::new(owner.sender().clone(), Arc::clone(self))
+            .with_signing_context(signing_context);
         // Player command packets never contain the typed slash, so any remaining slash is part of
         // the command, like WorldEdit's `//set`. Console and other senders may type one.
         let command = if matches!(owner.sender(), CommandSender::Player(_)) {
@@ -645,7 +700,7 @@ impl Server {
         workers: &WorldTickWorkers,
         tick_count: u64,
         runs_normally: bool,
-    ) -> Result<(), WorldTickWorkerError> {
+    ) -> Result<Vec<WorldGameTickTimings>, WorldTickWorkerError> {
         if runs_normally {
             self.worlds.advance_domain_game_times();
         }
@@ -691,7 +746,7 @@ impl Server {
                 "Game tick slow"
             );
         }
-        Ok(())
+        Ok(all_timings)
     }
 
     pub(super) fn tick_jobs(self: &Arc<Self>, tick_count: u64, runs_normally: bool) {

@@ -184,17 +184,16 @@ impl MenuKind for FurnaceMenuKind {
                 self.player.hotbar().end(),
                 FillDirection::Forward,
             )
-        } else if self.player.hotbar().contains(slot_index) {
-            behavior.move_item_stack_to(
-                guard,
-                slot_index,
-                &mut remaining,
-                self.player.main().start(),
-                self.player.main().end(),
-                FillDirection::Forward,
-            )
         } else {
-            false
+            self.player.hotbar().contains(slot_index)
+                && behavior.move_item_stack_to(
+                    guard,
+                    slot_index,
+                    &mut remaining,
+                    self.player.main().start(),
+                    self.player.main().end(),
+                    FillDirection::Forward,
+                )
         };
 
         if !moved {
@@ -204,7 +203,10 @@ impl MenuKind for FurnaceMenuKind {
         if remaining.count() == clicked.count() {
             return Some(ItemStack::empty());
         }
-        if let Some(remainder) = behavior.slots()[slot_index].on_take(guard, &remaining, player) {
+        let taken = clicked.copy_with_count(clicked.count - remaining.count);
+        let slot = &behavior.slots()[slot_index];
+        slot.on_quick_craft(&taken, player);
+        if let Some(remainder) = slot.on_take(guard, &remaining, player) {
             player.add_item_or_drop_with_guard(guard, remainder, Prediction::Predicted);
         }
         Some(clicked)

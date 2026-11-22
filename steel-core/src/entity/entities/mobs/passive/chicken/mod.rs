@@ -3,7 +3,10 @@
 
 use std::str::FromStr;
 use std::sync::{Arc, Weak};
+use steel_utils::random::legacy_random::LegacyRandom;
 
+use crate::loot::vanilla_loot_tables;
+use crate::loot::{LootContext, LootTableRef};
 use glam::DVec3;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
@@ -15,16 +18,14 @@ use steel_registry::entity_type::{
     EntityAttachmentPoint, EntityAttachments, EntityDimensions, EntityTypeRef,
 };
 use steel_registry::item_stack::ItemStack;
-use steel_registry::loot_table::{LootContext, LootTableRef};
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_entity_data::ChickenEntityData;
 use steel_registry::vanilla_item_tags::ItemTag;
-use steel_registry::vanilla_loot_tables;
 use steel_registry::{
     REGISTRY, RegistryExt, RegistryReference, TaggedRegistryExt, sound_events, vanilla_game_events,
 };
 use steel_utils::locks::SyncMutex;
-use steel_utils::random::legacy_random::LegacyRandom;
+use steel_utils::nbt::NbtValueInput as _;
 use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, Identifier};
 
@@ -36,14 +37,15 @@ use crate::entity::ai::goal::{
 use crate::entity::ai::path::PathType;
 use crate::entity::damage::DamageSource;
 use crate::entity::{
-    AgeableMob, AgeableMobBase, Animal, AnimalBase, Entity, EntityBase, EntityBaseLoad, EntityPose,
-    EntitySpawnReason, EntitySyncedData, LivingEntity, LivingEntityBase, Mob, MobBase,
-    PathfinderMob, SharedEntity, SpawnGroupData, SpawnRule, entity_loot_ref, living_loot_equipment,
-    position_rider_default, sync_dirty_mob_effects,
+    AgeableMob, AgeableMobBase, Animal, AnimalBase, DefaultEntityPush, Entity, EntityBase,
+    EntityBaseLoad, EntityPose, EntitySpawnReason, EntitySyncedData, LivingEntity,
+    LivingEntityBase, Mob, MobBase, PathfinderMob, RiderMove, SharedEntity, SpawnGroupData,
+    SpawnRule, entity_loot_ref, living_loot_equipment, position_rider_default,
+    sync_dirty_mob_effects,
 };
 use crate::physics::MoveResult;
 use crate::player::Player;
-use crate::world::World;
+use crate::world::{DifficultyInstance, World};
 
 const CHICKEN_BABY_PASSENGER_ATTACHMENTS: [EntityAttachmentPoint; 1] =
     [EntityAttachmentPoint::new(0.0, 0.375, 0.0)];
@@ -139,7 +141,9 @@ unsafe impl DowncastType for ChickenEntity {
 
 impl ChickenEntity {
     /// Vanilla `SpawnPlacements` predicate: `Animal.checkAnimalSpawnRules`.
-    pub(crate) const SPAWN_RULE: SpawnRule = <Self as Animal>::check_animal_spawn_rules;
+    pub(crate) const SPAWN_RULE: SpawnRule = |entity_type, level, spawn_reason, pos, random| {
+        <Self as Animal>::check_animal_spawn_rules(entity_type, level, spawn_reason, pos, random)
+    };
 
     /// Creates a new chicken at runtime.
     #[must_use]
@@ -372,15 +376,26 @@ impl ChickenEntity {
     /// Mirrors vanilla `LivingEntity.dropFromGiftLootTable` for the
     /// `gameplay/chicken_lay` table, returning whether any item was dropped.
     fn drop_gift_loot_table(&self, loot_table: LootTableRef) -> bool {
+        let Some(world) = self.level() else {
+            return false;
+        };
         let position = self.position();
-        let mut rng = rand::rng();
         let equipment = living_loot_equipment(self);
-        // Vanilla `LootContextParamSets.GIFT` carries only ORIGIN and THIS_ENTITY.
-        let mut context = LootContext::new(&mut rng)
-            .with_origin(position.x, position.y, position.z)
-            .with_this_entity(entity_loot_ref(self, Some(&equipment)));
-
-        let items = loot_table.get_random_items(&mut context);
+        let items = world.with_loot_random(Some(loot_table), 0, |rng| {
+            // Vanilla `LootContextParamSets.GIFT` carries only ORIGIN and THIS_ENTITY.
+            let mut context = LootContext::new(rng)
+                .with_world(&world)
+                .with_origin(position)
+                .with_this_entity(entity_loot_ref(self, Some(&equipment)));
+            loot_table.get_random_items(&mut context)
+        });
+        let items = match items {
+            Ok(items) => items,
+            Err(error) => {
+                log::error!("Failed to generate gift loot {}: {error}", loot_table.key);
+                return false;
+            }
+        };
         let dropped_any = !items.is_empty();
         for item in items {
             self.spawn_at_location(item, EGG_LAY_SPAWN_Y_OFFSET);
@@ -389,7 +404,17 @@ impl ChickenEntity {
     }
 }
 
+impl DefaultEntityPush for ChickenEntity {}
+
 impl Entity for ChickenEntity {
+    fn is_hard_collision_relevant(&self) -> bool {
+        false
+    }
+
+    fn as_default_entity_push(&self) -> Option<&dyn DefaultEntityPush> {
+        Some(self)
+    }
+
     fn base(&self) -> &EntityBase {
         &self.base
     }
@@ -445,8 +470,8 @@ impl Entity for ChickenEntity {
         state.next_flap = fly_dist + state.flap_speed / NEXT_FLAP_SPEED_DIVISOR;
     }
 
-    fn position_rider(&self, passenger: &dyn Entity) {
-        position_rider_default(self, passenger);
+    fn position_rider(&self, passenger: &dyn Entity, move_behavior: RiderMove) {
+        position_rider_default(self, passenger, move_behavior);
         if let Some(living) = passenger.as_living_entity() {
             living.set_y_body_rot(self.y_body_rot());
         }
@@ -467,8 +492,11 @@ impl Entity for ChickenEntity {
         self.load_ageable_mob(nbt);
         self.load_animal(nbt);
 
-        self.set_chicken_jockey(nbt.byte("IsChickenJockey").is_some_and(|value| value != 0));
-        if let Some(egg_time) = nbt.int("EggLayTime") {
+        self.set_chicken_jockey(
+            nbt.byte_value("IsChickenJockey")
+                .is_some_and(|value| value != 0),
+        );
+        if let Some(egg_time) = nbt.int_value("EggLayTime") {
             self.set_egg_time(egg_time);
         }
         if let Some(variant) = nbt.string("variant")
@@ -626,6 +654,7 @@ impl Mob for ChickenEntity {
     fn finalize_spawn(
         &self,
         world: &Arc<World>,
+        difficulty: DifficultyInstance,
         spawn_reason: EntitySpawnReason,
         group_data: Option<SpawnGroupData>,
     ) -> Option<SpawnGroupData> {
@@ -650,7 +679,7 @@ impl Mob for ChickenEntity {
             self.set_sound_variant(sound_variant);
         }
 
-        self.finalize_spawn_ageable_mob(world, spawn_reason, group_data)
+        self.finalize_spawn_ageable_mob(world, difficulty, spawn_reason, group_data)
     }
 
     fn mob_interact(&self, player: &Player, hand: InteractionHand) -> InteractionResult {

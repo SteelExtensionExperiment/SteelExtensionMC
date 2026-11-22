@@ -4,9 +4,12 @@ mod broadcasting;
 /// Tick-polled server jobs.
 pub mod jobs;
 mod packet_processor;
+mod perf;
 mod pregen;
 /// The registry cache for the server.
 pub mod registry_cache;
+/// Reloadable server resources.
+pub mod resources;
 mod run_loop;
 mod service_keys;
 pub mod temporary;
@@ -47,6 +50,7 @@ use crate::entity::{
     Entity, EntityBase, PendingWorldChangeToken, RemovalReason, SharedEntity, change_entity_world,
 };
 use crate::extension::{Events, Extensions, RegisteredExtensions};
+use crate::loot::random_sequences::DomainRandomSequences;
 
 use crate::chunk_saver::{ChunkStorage, PersistentEntity, registry::WorldStorageRegistry};
 use crate::level_data::{GameTimeSource, LevelDataManager, RespawnData, WorldGenerationSettings};
@@ -55,6 +59,7 @@ use crate::permission::{
     PermissionGroupsConfig, PermissionMetadataExpression, PermissionRuleExpression, PermissionSet,
     PermissionSubjectIndex, PermissionSubjectState,
 };
+use crate::player::chat::{OutgoingChatMessage, profile_key::RemoteChatSession};
 use crate::player::chunk_sender::{ChunkSender, EncodedChunk};
 use crate::player::connection::NetworkConnection;
 use crate::player::connection::ScheduledPlayPacket;
@@ -68,9 +73,10 @@ use crate::player::{
     ProfileLookupError, ResetReason, is_valid_player_name, lookup_online_profile, offline_uuid,
 };
 use crate::portal::{
-    PortalKind, TeleportPostTransition, TeleportTransition, WorldChangeRequest, end_gateway,
-    end_portal, nether_portal,
+    PortalKind, TeleportPostTransition, TeleportTransition, WorldChangeRequest, WorldSelection,
+    end_gateway, end_portal, nether_portal,
 };
+pub use crate::portal::{PreparedSpawn, WorldEntry};
 use crate::scoreboard::DomainScoreboards;
 use crate::server::jobs::{FnServerJob, ServerJobContext, ServerJobQueue};
 use crate::server::packet_processor::PacketProcessor;
@@ -83,6 +89,7 @@ use crate::world::{PlayerMap, World, WorldConfig};
 use crate::worldgen::registry::GeneratorOutput;
 use crossbeam::queue::SegQueue;
 use glam::DVec3;
+use perf::PerfRecorder;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use rustc_hash::FxHashMap;
 use std::sync::atomic::AtomicI32;
@@ -128,7 +135,7 @@ use uuid::Uuid;
 const TAB_LIST_UPDATE_INTERVAL: u64 = 20;
 /// Interval in ticks between player info broadcasts (600 ticks = 30 seconds).
 const SEND_PLAYER_INFO_INTERVAL: u64 = 600;
-/// Wall-clock interval between saves of command-owned persistent server data.
+/// Wall-clock interval between saves of domain persistent server data.
 /// Matches vanilla's intended five-minute autosave cadence.
 const COMMAND_DATA_AUTOSAVE_INTERVAL: Duration = Duration::from_secs(300);
 
@@ -151,12 +158,14 @@ impl TabListTickStats {
     }
 }
 
-/// Results from saving every command-owned persistent data set.
+/// Results from saving domain persistent data, including loot random sequences.
 pub struct CommandDataSaveResults {
     /// Number of dirty domain scoreboards written, or the save error.
     pub scoreboards: io::Result<usize>,
     /// Number of dirty domain command-storage values written, or the save error.
     pub storage: io::Result<usize>,
+    /// Number of dirty domain random-sequence collections written, or the save error.
+    pub random_sequences: io::Result<usize>,
 }
 
 mod known_players;
@@ -244,6 +253,9 @@ pub async fn test_server_with_worlds_and_config(
     let command_storage = DomainCommandStorage::load(&worlds)
         .await
         .map_err(|error| format!("test command storage should load: {error}"))?;
+    let random_sequences = DomainRandomSequences::load(&worlds)
+        .await
+        .map_err(|error| format!("test random sequences should load: {error}"))?;
     let player_data_storage = PlayerDataStorage::in_memory();
     let (registered_commands, world_generators, extensions) =
         if let Some((extensions, commands)) = startup {
@@ -308,8 +320,10 @@ pub async fn test_server_with_worlds_and_config(
         player_admission_changed: Notify::new(),
         server_tick_changed: Notify::new(),
         tick_rate_manager: SyncRwLock::new(TickRateManager::new()),
+        perf: PerfRecorder::new(),
         scoreboards,
         command_storage,
+        random_sequences,
         command_dispatcher: SyncRwLock::new(registered_commands.dispatcher),
         command_permission_keys,
         command_requests: CommandRequestQueue::new(),
@@ -329,12 +343,6 @@ pub async fn test_server_with_worlds_and_config(
         pending_domain_switches: SyncMutex::new(Vec::new()),
         player_idle_timeout: AtomicI32::new(0),
     }))
-}
-
-#[derive(Clone, Copy)]
-struct PreparedSpawn {
-    position: DVec3,
-    rotation: (f32, f32),
 }
 
 fn apply_default_spawn(player: &Arc<Player>, world: &Arc<World>, spawn: PreparedSpawn) {
@@ -473,6 +481,7 @@ struct DomainSwitchRequest {
     player: Arc<Player>,
     target_domain: String,
     target_world: Option<Arc<World>>,
+    entry: WorldEntry,
     pending_token: PendingWorldChangeToken,
 }
 
@@ -509,6 +518,7 @@ use player_admission::{PlayerAdmissionState, PlayerDisconnectQueue, PlayerJoinQu
 
 mod world_changes;
 
+use crate::command::signing_context::CommandSigningContext;
 use jobs::domain_switch::DomainSwitchJob;
 use jobs::teleport::{
     EndGatewayTeleportJob, EndPortalTeleportJob, EnderPearlRestoreJob, NetherPortalTeleportJob,
@@ -544,6 +554,8 @@ pub struct Server {
     server_tick_changed: Notify,
     /// The tick rate manager for the server.
     pub tick_rate_manager: SyncRwLock<TickRateManager>,
+    /// Tick-phase recorder behind `/perf`.
+    pub(crate) perf: PerfRecorder,
     /// The number of minutes required for a player to be idle for them to be kicked (timed out) from the server.
     /// If this is equal to 0, no kicking will happen.
     pub player_idle_timeout: AtomicI32,
@@ -551,6 +563,7 @@ pub struct Server {
     pub scoreboards: DomainScoreboards,
     /// Command NBT storage isolated by Steel domain.
     pub(crate) command_storage: DomainCommandStorage,
+    random_sequences: DomainRandomSequences,
     /// Saves and dispatches commands to appropriate handlers.
     command_dispatcher: SyncRwLock<CommandDispatcher>,
     /// Steel-owned permission keys exposed for command autocomplete.
@@ -900,12 +913,9 @@ impl Server {
                 .extensions
                 .set(Arc::clone(&extensions))
                 .map_err(|_| format!("extensions already installed for {}", world_entry.key))?;
-            world
-                .initialize_spawn_if_needed()
-                .await
-                .map_err(|e| format!("failed to initialize spawn for {}: {e}", world_entry.key))?;
             Ok(world)
         };
+        let mut spawn_worlds = Vec::with_capacity(resolved_worlds.worlds.len());
         for domain in &resolved_worlds.domains {
             let primary_config = resolved_worlds
                 .worlds
@@ -919,6 +929,7 @@ impl Server {
                 })?;
             let primary = construct_world(primary_config, GameTimeSource::Primary).await?;
             let clock = Arc::clone(&primary.game_time);
+            spawn_worlds.push(Arc::clone(&primary));
             worlds.insert(primary_config.key.clone(), primary);
             for world_entry in resolved_worlds
                 .worlds
@@ -928,6 +939,7 @@ impl Server {
                 let world =
                     construct_world(world_entry, GameTimeSource::Derived(Arc::clone(&clock)))
                         .await?;
+                spawn_worlds.push(Arc::clone(&world));
                 worlds.insert(world_entry.key.clone(), world);
             }
         }
@@ -939,6 +951,16 @@ impl Server {
         let command_storage = DomainCommandStorage::load(&worlds)
             .await
             .map_err(|error| format!("failed to load domain command storage: {error}"))?;
+        let random_sequences = DomainRandomSequences::load(&worlds)
+            .await
+            .map_err(|error| format!("failed to load domain random sequences: {error}"))?;
+        // Spawn chunk postprocessing can evaluate loot. Bind domain services first,
+        // then initialize spawns in primary-first construction order.
+        for world in spawn_worlds {
+            world.initialize_spawn_if_needed().await.map_err(|error| {
+                format!("failed to initialize spawn for {}: {error}", world.key)
+            })?;
+        }
         let registered_commands = commands.inner;
         let command_permission_keys = registered_commands
             .permissions
@@ -968,9 +990,11 @@ impl Server {
             server_tick_changed: Notify::new(),
             registry_cache,
             tick_rate_manager: SyncRwLock::new(TickRateManager::new()),
+            perf: PerfRecorder::new(),
             player_idle_timeout: AtomicI32::new(0),
             scoreboards,
             command_storage,
+            random_sequences,
             command_dispatcher: SyncRwLock::new(registered_commands.dispatcher),
             command_permission_keys,
             command_requests: CommandRequestQueue::new(),
@@ -1009,11 +1033,12 @@ impl Server {
         self.command_storage.save(&self.worlds).await
     }
 
-    /// Saves all command-owned persistent data while allowing each data set to fail independently.
+    /// Saves domain command data and loot streams, allowing each data set to fail independently.
     pub async fn save_command_data(&self) -> CommandDataSaveResults {
         CommandDataSaveResults {
             scoreboards: self.scoreboards.save(&self.worlds).await,
             storage: self.save_command_storage().await,
+            random_sequences: self.random_sequences.save(&self.worlds).await,
         }
     }
 
@@ -1021,12 +1046,63 @@ impl Server {
     pub fn submit_command(
         &self,
         sender: CommandSender,
+        mut command: String,
+        signing_context: Option<CommandSigningContext>,
+    ) -> Result<(), CommandQueueFull> {
+        if command.starts_with('/') {
+            command.remove(0);
+        }
+
+        self.queue_command(sender, command, signing_context)
+    }
+
+    pub(crate) fn queue_command(
+        &self,
+        sender: CommandSender,
         command: String,
+        signing_context: Option<CommandSigningContext>,
     ) -> Result<(), CommandQueueFull> {
         self.command_requests.submit(CommandRequest::Execute {
             owner: CommandExecutionOwner::capture(sender, self),
             command,
+            signing_context,
         })
+    }
+
+    /// publishes chat through the same queue as signed cmds and session announcement
+    pub(crate) fn queue_player_chat(
+        &self,
+        player: &Arc<Player>,
+        message: OutgoingChatMessage,
+    ) -> Result<(), CommandQueueFull> {
+        self.command_requests.submit(CommandRequest::Chat {
+            owner: CommandExecutionOwner::capture(CommandSender::Player(Arc::clone(player)), self),
+            message,
+        })
+    }
+
+    pub(crate) fn queue_chat_session_update(
+        &self,
+        player: &Arc<Player>,
+        session: RemoteChatSession,
+    ) {
+        let Some(transition) = self.begin_player_packet_transition(player) else {
+            return;
+        };
+
+        let owner = CommandExecutionOwner::capture(CommandSender::Player(Arc::clone(player)), self);
+        if self
+            .command_requests
+            .submit(CommandRequest::ChatSessionUpdate {
+                owner,
+                session: Box::new(session),
+                transition,
+            })
+            .is_err()
+        {
+            self.finish_player_packet_transition(transition);
+            tracing::error!("failed to queue chat session update");
+        }
     }
 
     pub(crate) fn submit_command_suggestions(
@@ -1053,7 +1129,7 @@ impl Server {
             .schedule(player, packet, payload_bytes);
     }
 
-    /// Pauses later packets while `player` is replaced by a new incarnation.
+    /// pauses later packets until the current playersession transition is complete
     pub(crate) fn begin_player_packet_transition(
         &self,
         player: &Arc<Player>,
@@ -1064,7 +1140,7 @@ impl Server {
         self.packet_processor.pause_player_session(&player.session)
     }
 
-    /// Resumes packets retained by an exact player-replacement transition.
+    /// resumes packets retained by this playersession transition
     pub(crate) fn finish_player_packet_transition(
         &self,
         transition: PlayerPacketTransition,
@@ -1107,5 +1183,31 @@ impl Server {
                 Vec::new()
             }
         }
+    }
+
+    /// Returns whether a command requires signed arguments when parsed for the given sender.
+    pub fn command_requires_signed_arguments(
+        self: &Arc<Self>,
+        command: &str,
+        sender: CommandSender,
+    ) -> bool {
+        let source = CommandSource::new(sender, Arc::clone(self));
+        let dispatcher = self.command_dispatcher.read();
+        let parse = dispatcher.parse(command, source);
+        dispatcher.has_signed_arguments(&parse)
+    }
+
+    /// Inspects the parsed command nodes and collects the names and text slices
+    /// of all arguments requiring cryptographic signatures (e.g. `minecraft:message`).
+    pub fn collect_signable_arguments<'a>(
+        self: &Arc<Self>,
+        command: &'a str,
+        sender: CommandSender,
+    ) -> Vec<(String, &'a str)> {
+        let source = CommandSource::new(sender, Arc::clone(self));
+        let dispatcher = self.command_dispatcher.read();
+        let parse = dispatcher.parse(command, source);
+
+        dispatcher.collect_signable_arguments(&parse, command)
     }
 }

@@ -10,12 +10,15 @@ use std::sync::Arc;
 use glam::DVec3;
 use steel_registry::blocks::properties::Direction;
 use steel_registry::client_content::ClientFluid;
-use steel_registry::vanilla_fluids;
+use steel_registry::items::ItemRef;
+use steel_registry::sound_event::SoundEventRef;
+use steel_registry::{sound_events, vanilla_fluids, vanilla_items};
 use steel_utils::{BlockPos, BlockStateId};
 
 use crate::entity::{Entity, InsideBlockEffectCollector, InsideBlockEffectType};
 use crate::fluid::{
     FlowingFluid, FluidBehavior, FluidRef, FluidState, get_flow as flowing_fluid_flow,
+    liquid_block_state,
 };
 use crate::world::World;
 
@@ -70,6 +73,22 @@ impl ExtensionFluid {
 impl FluidBehavior for ExtensionFluid {
     fn fluid_type(&self) -> FluidRef {
         self.fluid.source
+    }
+
+    fn create_legacy_block(&self, fluid_state: FluidState) -> BlockStateId {
+        liquid_block_state(self.fluid.block, fluid_state)
+    }
+
+    fn bucket(&self) -> ItemRef {
+        self.fluid.bucket.unwrap_or(&vanilla_items::AIR)
+    }
+
+    fn pickup_sound(&self) -> Option<SoundEventRef> {
+        Some(if self.displayed_as_water() {
+            &sound_events::ITEM_BUCKET_FILL
+        } else {
+            &sound_events::ITEM_BUCKET_FILL_LAVA
+        })
     }
 
     fn is_same(&self, other: FluidRef) -> bool {
