@@ -28,8 +28,8 @@ description: "Task list for the extension hologram host platform"
 
 ## Phase 2: Foundation
 
-- [ ] T004 Make a text display non-persistent for holograms without changing `/summon text_display` (FR-008): the mechanism chosen after T001 and T002 (a flag on `TextDisplayEntity` or a Steel-owned wrapper overriding `Entity::is_persistent`, `entity/entity/mod.rs:172-176`). Tests: a hologram entity is absent from saved chunk data; a summoned text display still saves.
-- [ ] T005 Add `steel-core/src/world/hologram.rs` (`HologramRegistry`, `Hologram`, data-model) and hook chunk load, chunk unload and world unload into it. Tests: exactly one entity after repeated unload and load cycles; text set while unloaded shows after load; world unload drops the records and entities; a removed handle fails.
+- [x] T004 Make a text display non-persistent for holograms without changing `/summon text_display` (FR-008): the mechanism chosen after T001 and T002 (a flag on `TextDisplayEntity` or a Steel-owned wrapper overriding `Entity::is_persistent`, `entity/entity/mod.rs:172-176`). Tests: a hologram entity is absent from saved chunk data; a summoned text display still saves.
+- [x] T005 Add `steel-core/src/world/hologram.rs` (`HologramRegistry`, `Hologram`, data-model) and hook chunk load, chunk unload and world unload into it. Tests: exactly one entity after repeated unload and load cycles; text set while unloaded shows after load; world unload drops the records and entities; a removed handle fails.
 
 **Checkpoint**: the host can hold holograms through the whole chunk lifecycle.
 
@@ -37,8 +37,8 @@ description: "Task list for the extension hologram host platform"
 
 ## Phase 3: User Stories 1 and 2 (Priority: P1) 🎯 MVP
 
-- [ ] T006 [US1] Add `HologramId` and `Billboard` in `steel-extension-api/src/runtime/types.rs` and the `create_hologram` binding with adapter in `host/runtime.rs` ([contracts/host-api.md](contracts/host-api.md)); validate world, text and build height. Tests: each failure path; success returns a handle.
-- [ ] T007 [US2] Add `set_hologram_text` and `remove_hologram`. Tests: one entity-data update per change; invalid handle message; remove returns `false` the second time.
+- [x] T006 [US1] Add `HologramId` and `Billboard` in `steel-extension-api/src/runtime/types.rs` and the `create_hologram` binding with adapter in `host/runtime.rs` ([contracts/host-api.md](contracts/host-api.md)); validate world, text and build height. Tests: each failure path; success returns a handle.
+- [x] T007 [US2] Add `set_hologram_text` and `remove_hologram`. Tests: one entity-data update per change; invalid handle message; remove returns `false` the second time.
 
 ---
 
@@ -51,7 +51,7 @@ description: "Task list for the extension hologram host platform"
 
 ## Phase 5: Polish
 
-- [ ] T010 [P] Document the bindings and the lifecycle rules in `doc/extensions/api.md`, including that extensions recreate holograms on `on_world_load`.
+- [x] T010 [P] Document the bindings and the lifecycle rules in `doc/extensions/api.md`, including that extensions recreate holograms on `on_world_load`.
 - [ ] T011 [P] Run `cargo clippy -r --workspace --all-targets --all-features`, `cargo fmt --all --check`, `typos`, and the manual check in [quickstart.md](quickstart.md).
 
 ---

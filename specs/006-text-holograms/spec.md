@@ -46,7 +46,7 @@ receives a text display entity with that text and the face-the-viewer mode.
 
 1. **Given** a loaded world and chunk, **When** a hologram is created, **Then** a handle is returned and nearby players see the text.
 2. **Given** a world key that is not loaded, **When** a hologram is created, **Then** the call fails with a message naming the world.
-3. **Given** text that is not valid plain text or a JSON component, **When** a hologram is created, **Then** the call fails and no entity exists.
+3. **Given** text that starts like a JSON component but is malformed, **When** a hologram is created, **Then** it is shown as plain text, as in every other extension text API (FR-007); `parse_text` never fails.
 4. **Given** a position outside the dimension's build height, **When** a hologram is created, **Then** the call fails.
 
 ---

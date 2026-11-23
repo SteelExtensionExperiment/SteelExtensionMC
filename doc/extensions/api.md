@@ -484,6 +484,7 @@ copyable opaque values, not borrowed host objects.
 | `spawn_bot(world_key, name, position)` | `ApiResult<PlayerId>`; requires a prepared temporary world. |
 | `despawn_bot(player)` | Fallible removal through normal disconnect handling. |
 | `control_bot(player, input)` | Fallible intent for the bot's next actor tick. |
+| `create_hologram(world, position, text, billboard)`, `set_hologram_text(id, text)`, `remove_hologram(id)` | Text holograms; see [Text holograms](#text-holograms). |
 
 `PlayerInfo` contains `id`, owned `name` and `world` strings, `position`, `bot`,
 and `health`. `PlayerId` includes a UUID and actor ID internally; an old identity
@@ -512,6 +513,48 @@ restores player state, and reconnects retain the last lasting domain. See the
 `jump`, `sneak`, and `sprint` booleans. Controls expire after one actor tick;
 reapply active intent on subsequent ticks. Movement, reach, gravity, and digging
 use the host's regular implementations.
+
+## Text holograms
+
+`Server<'_>` can show floating text without exposing entities. A hologram is a
+vanilla text display entity with vanilla defaults for everything except its text
+and billboard mode.
+
+| `Server<'_>` method | Result and constraints |
+| --- | --- |
+| `create_hologram(world, position, text, billboard)` | `ApiResult<HologramId>`; `world` is a `domain:world` key. Fails for an unloaded world or a position outside the build height. |
+| `set_hologram_text(id, text)` | `ApiResult<()>`; updates the entity if it exists, otherwise the stored text used on the next chunk load. |
+| `remove_hologram(id)` | `ApiResult<bool>`; `false` when nothing existed. Removes the entity if it is loaded. |
+
+`HologramId` is an opaque `u64` handle that is never reused in a process. It is
+not owned by an extension: any extension holding it may update or remove the
+hologram. `Billboard` is `Fixed`, `Vertical`, `Horizontal`, or `Center`.
+
+`text` is plain text or a JSON component, parsed like other text APIs (malformed JSON shows as plain text); use newlines for
+multiple lines. Failures return messages and never block the tick.
+
+Holograms are never saved to chunk or entity data. The host keeps each one
+across chunk unload and load: the entity is removed with its chunk and recreated
+when the chunk loads, one entity at a time. Creating a hologram in an unloaded
+chunk stores it, and the entity appears on load. Holograms do not force-load
+chunks. If something else removes the entity (for example `/kill`) while its
+chunk stays loaded, it is not respawned until the chunk reloads.
+
+A hologram is dropped when its world is unloaded or removed, and its handle then
+fails with "unknown or removed hologram". The host does not remember holograms
+across world unloads or restarts; recreate them in your own `WorldLoadEvent`
+handler.
+
+```rust
+let id = server.create_hologram(
+    "minecraft:overworld".into(),
+    Position { x: 0.5, y: 80.0, z: 0.5 },
+    "Spawn\nWelcome!".into(),
+    Billboard::Center,
+)?;
+server.set_hologram_text(id, "Spawn\nOpen".into())?;
+let existed = server.remove_hologram(id)?;
+```
 
 ## Gameplay API
 

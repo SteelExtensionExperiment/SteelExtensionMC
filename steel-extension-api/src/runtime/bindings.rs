@@ -2,10 +2,10 @@
 /// Checked command and runtime bindings.
 pub mod api {
     #[cfg(feature = "host")]
-    use crate::host::runtime as host;
+    use crate::host::{holograms, runtime as host};
     use crate::runtime::{
-        BotInput, GameMode, Operation, OperationStatus, PlayerId, PlayerInfo, Position,
-        WorldSettings,
+        Billboard, BotInput, GameMode, HologramId, Operation, OperationStatus, PlayerId,
+        PlayerInfo, Position, WorldSettings,
     };
     use crate::{ApiResult, BlockPos, BlockState, Hooks};
     #[cfg(feature = "host")]
@@ -213,6 +213,36 @@ pub mod api {
             host::control_bot(self.host(), player, input)
                 .map_err(ApiString::from)
                 .into()
+        }
+        /// Creates a text hologram at `position` in a loaded world. `text` is plain text or a
+        /// vanilla JSON component; newlines make lines. The entity exists while its chunk is
+        /// loaded and is never saved. The handle ends with `remove_hologram` or the world.
+        pub fn create_hologram(
+            &self,
+            world: Str<'_>,
+            position: Position,
+            text: Str<'_>,
+            billboard: Billboard,
+        ) -> ApiResult<HologramId> {
+            holograms::create(
+                self.host(),
+                world.as_str(),
+                position,
+                text.as_str(),
+                billboard,
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
+        /// Replaces a hologram's text, sending one entity-data update to its viewers.
+        pub fn set_hologram_text(&self, id: HologramId, text: Str<'_>) -> ApiResult<()> {
+            holograms::set_text(self.host(), id, text.as_str())
+                .map_err(ApiString::from)
+                .into()
+        }
+        /// Removes a hologram and its entity. Returns whether the handle was still valid.
+        pub fn remove_hologram(&self, id: HologramId) -> ApiResult<bool> {
+            Ok::<_, ApiString>(holograms::remove(self.host(), id)).into()
         }
         /// Reads a block in a loaded world without requesting generation.
         pub fn block(&self, key: Str<'_>, pos: BlockPos) -> ApiResult<BlockState> {
