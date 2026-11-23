@@ -1,5 +1,5 @@
 //! World preparation owns generation and preload leases until tick-stage publication.
-use super::{Server, TemporaryWorldRequest};
+use super::{RuntimeWorldRequest, Server, WorldSource};
 use crate::{
     chunk::{
         chunk_request::{ChunkRequestHandle, ChunkTicketKind},
@@ -39,7 +39,7 @@ impl PreparedWorld {
     pub(super) async fn prepare(
         server: Arc<Server>,
         source: Arc<World>,
-        request: TemporaryWorldRequest,
+        request: RuntimeWorldRequest,
         validated: ValidatedWorldGeneratorConfig,
         game_time_source: GameTimeSource,
         random_sequences: Arc<RandomSequences>,
@@ -50,8 +50,19 @@ impl PreparedWorld {
             request.seed,
             Arc::clone(&source.chunk_map.generation_pool),
         )?;
+        let (generator, storage) = match &request.source {
+            WorldSource::Generator { generator, .. } => {
+                (generator.clone(), WorldStorageConfig::RamOnly)
+            }
+            WorldSource::Template(template) => (
+                template.generation.generator.clone(),
+                WorldStorageConfig::RamClone {
+                    template: Arc::clone(template),
+                },
+            ),
+        };
         let generation_settings = WorldGenerationSettings::from_generator_config(
-            request.generator.clone(),
+            generator,
             &output.config,
             output.dimension_type.key.clone(),
             output.dimension_type.min_y,
@@ -65,7 +76,7 @@ impl PreparedWorld {
             WorldConfig {
                 damage_history: Arc::clone(&server.damage_history),
                 game_time_source,
-                storage: WorldStorageConfig::RamOnly,
+                storage,
                 level_data_path: None,
                 generator: Arc::new(output.generator),
                 generation_settings,
@@ -98,10 +109,11 @@ impl PreparedWorld {
         {
             let mut data = world.level_data.write();
             data.data_mut().set_spawn_pos(request.spawn);
+            data.data_mut().spawn.angle = request.spawn_angle;
             data.data_mut().set_respawn_data(RespawnData::of(
                 request.key.clone(),
                 request.spawn,
-                0.0,
+                request.spawn_angle,
                 0.0,
             ));
             data.data_mut().initialized = true;

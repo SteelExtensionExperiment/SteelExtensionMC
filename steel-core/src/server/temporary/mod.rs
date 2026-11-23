@@ -10,11 +10,15 @@ use crate::{
     chunk::chunk_request::ChunkRequestHandle, level_data::GameTimeSource,
     loot::random_sequences::RandomSequences, world::World,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use tokio::task::JoinHandle;
 use tokio_util::task::TaskTracker;
+mod clone;
 mod preparation;
+mod request;
+pub use clone::CloneOverrides;
 use preparation::PreparedWorld;
+pub use request::{DomainTarget, RuntimeWorldRequest, WorldSource};
 use std::sync::{Arc, Weak, mpsc};
 use steel_utils::{
     BlockPos, Identifier,
@@ -49,6 +53,8 @@ pub(super) struct TemporaryWorlds {
 #[derive(Default)]
 struct State {
     domains: FxHashMap<String, DomainState>,
+    /// Keys of worlds being prepared, so a duplicate request fails before preparation.
+    pending_worlds: FxHashSet<Identifier>,
 }
 struct DomainState {
     closing: bool,
@@ -70,22 +76,37 @@ impl Server {
         self: &Arc<Self>,
         request: TemporaryWorldRequest,
     ) -> Result<WorldOperationId, String> {
+        self.create_runtime_world(request.into())
+    }
+    /// Starts preparing a RAM-only runtime world. The operation publishes it at a tick boundary.
+    ///
+    /// # Errors
+    /// Fails immediately, without an operation, when the key is loaded or pending, the domain
+    /// rules of the target are not met, the generator config is invalid, or the spawn is outside
+    /// the dimension's build height.
+    pub fn create_runtime_world(
+        self: &Arc<Self>,
+        request: RuntimeWorldRequest,
+    ) -> Result<WorldOperationId, String> {
         if !World::is_in_spawnable_bounds(request.spawn) {
             return Err("spawn is outside world bounds".into());
         }
         let domain = request.key.namespace.to_string();
-        if request.primary && self.player_data_storage.is_temporary_domain(&domain) {
+        let primary = request.target == DomainTarget::NewTemporary;
+        if primary && self.player_data_storage.is_temporary_domain(&domain) {
             return Err("temporary domain identity has already been used".into());
         }
+        if self.worlds.get(&request.key).is_some() {
+            return Err(format!("world {} already exists", request.key));
+        }
         let source = self.overworld();
-        let validated = self
-            .world_generators
-            .validate_config(&request.generator, &request.config)?;
+        let (generator, config) = request.source.generator_config();
+        let validated = self.world_generators.validate_config(generator, config)?;
         let dimension = validated.dimension_type();
         if !(dimension.min_y..dimension.min_y + dimension.height).contains(&request.spawn.y()) {
             return Err("spawn is outside the dimension build height".into());
         }
-        let (game_time_source, random_sequences) = if request.primary {
+        let (game_time_source, random_sequences) = if primary {
             (
                 GameTimeSource::Primary,
                 Arc::new(RandomSequences::new(request.seed)),
@@ -108,10 +129,25 @@ impl Server {
         };
         let id = {
             let mut state = self.temporary_worlds.state.lock();
-            if request.primary {
+            if state.pending_worlds.contains(&request.key) {
+                return Err(format!("world {} is already being created", request.key));
+            }
+            if primary {
                 if self.worlds.has_domain(&domain) || state.domains.contains_key(&domain) {
                     return Err("domain identity is already in use".into());
                 }
+            } else {
+                let entry = state
+                    .domains
+                    .get(&domain)
+                    .ok_or("worlds can only be added to temporary domains")?;
+                if entry.closing {
+                    return Err("temporary domain is closing".into());
+                }
+            }
+            let id = self.world_operations.allocate()?;
+            state.pending_worlds.insert(request.key.clone());
+            if primary {
                 state.domains.insert(
                     domain.clone(),
                     DomainState {
@@ -120,19 +156,12 @@ impl Server {
                         spawn_tickets: Vec::new(),
                     },
                 );
-            } else {
-                let entry = state
-                    .domains
-                    .get_mut(&domain)
-                    .ok_or("worlds can only be added to temporary domains")?;
-                if entry.closing {
-                    return Err("temporary domain is closing".into());
-                }
+            } else if let Some(entry) = state.domains.get_mut(&domain) {
                 entry.creating += 1;
             }
-            self.world_operations.allocate()?
+            id
         };
-        let primary = request.primary;
+        let key = request.key.clone();
         let (sender, receiver) = mpsc::channel();
         let server = Arc::clone(self);
         let task = self.temporary_worlds.cleanup.spawn(async move {
@@ -150,6 +179,7 @@ impl Server {
         self.jobs.spawn(CreateWorldJob {
             server: Arc::downgrade(self),
             id,
+            key,
             domain,
             primary,
             receiver,
@@ -186,6 +216,7 @@ impl Server {
 struct CreateWorldJob {
     server: Weak<Server>,
     id: WorldOperationId,
+    key: Identifier,
     domain: String,
     primary: bool,
     receiver: mpsc::Receiver<Result<PreparedWorld, String>>,
@@ -241,6 +272,7 @@ impl ServerJob for CreateWorldJob {
         });
         {
             let mut state = server.temporary_worlds.state.lock();
+            state.pending_worlds.remove(&self.key);
             if let Some(domain) = state.domains.get_mut(&self.domain) {
                 domain.creating -= 1;
             }
@@ -265,6 +297,7 @@ impl ServerJob for CreateWorldJob {
         self.task.abort();
         if let Some(server) = self.server.upgrade() {
             let mut state = server.temporary_worlds.state.lock();
+            state.pending_worlds.remove(&self.key);
             if self.primary {
                 state.domains.remove(&self.domain);
             } else if let Some(domain) = state.domains.get_mut(&self.domain) {
@@ -365,5 +398,7 @@ impl ServerJob for DestroyDomainJob {
     }
 }
 
+#[cfg(test)]
+mod clone_tests;
 #[cfg(test)]
 mod tests;

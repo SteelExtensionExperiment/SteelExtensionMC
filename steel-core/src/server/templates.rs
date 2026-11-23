@@ -67,6 +67,15 @@ impl Server {
         Ok(id)
     }
 
+    /// Registers an already built template, for tests.
+    #[cfg(test)]
+    pub(crate) fn register_ready_template(&self, template: Arc<WorldTemplate>) {
+        self.world_templates
+            .entries
+            .lock()
+            .insert(template.key.clone(), TemplateEntry::Ready(template));
+    }
+
     /// The registry entry for `key`, if any.
     #[must_use]
     pub fn world_template(&self, key: &Identifier) -> Option<TemplateEntry> {
