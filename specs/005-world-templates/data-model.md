@@ -95,7 +95,7 @@ domain identity (existing rule, `mod.rs:94-96`).
 
 | Field | Change |
 | --- | --- |
-| `default_worlds: Map<String, Identifier>` | Replaced by `domains: Map<String, DomainEntry { default_world: Option<Identifier>, random_sequences: Option<Arc<RandomSequences>> }>`. The sequences field is assumption A4. |
+| `default_worlds: Map<String, Identifier>` | Replaced by `domains: Map<String, DomainEntry { default_world: Option<Identifier> }>`. Random sequences stay on the default world (A4 rejected). |
 | `runtime_worlds: Set<Identifier>` | New. Every world that can be removed. |
 | `clock_owners: Vec<Identifier>` | New. `advance_domain_game_times` advances these instead of reading default worlds. |
 | `has_domain` | Reads `domains`, so it stays true after the default world is removed. |
@@ -125,8 +125,9 @@ covers lasting domains that receive clones.
 
 ### `DomainRandomSequences` (extended) — `loot/random_sequences.rs`
 
-Gains an accessor so `Server` can hand a lasting domain's shared sequences to a new clone. No change
-to saving (`save` already uses the domain default world).
+Gains an accessor so `Server` can hand a lasting domain's shared sequences to a new clone. A
+temporary domain's sequences stay on its default world (A4 rejected). No change to saving (`save`
+already uses the domain default world).
 
 ## Platform: extension API (`steel-extension-api`)
 

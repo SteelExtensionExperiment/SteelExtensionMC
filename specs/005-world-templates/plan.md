@@ -130,7 +130,7 @@ These change crates every extension relies on, so they are serialized by the use
 | G1 | Read-only region reader and `WorldTemplate` | clone, US1 | T002–T005 |
 | G2 | Template registry and async load | clone, US1 | T006, T007 |
 | G3 | Copy-on-write RAM storage and `RamClone` | clone, US1 | T008 |
-| G4 | Domain map: optional default world, runtime worlds, clock owners, domain random sequences | US1–US3 | T009 |
+| G4 | Domain map: optional default world, runtime worlds, clock owners | US1–US3 | T009 |
 | G5 | Saved-data target fix for scoreboard and command storage | US2 (data safety) | T010 |
 | G6 | Generalized creation, lasting-domain admission, independent clocks | US1, US2 | T011, T013 |
 | G7 | Single-world removal with relocation | US3 | T016, T017 |

@@ -199,7 +199,7 @@ before implementation, and measure them in the Polish phase.
 - **A1** (confirmed in design): a temporary domain whose first or default world was removed has no default world. `switch_domain` into it fails, `select_world` into its remaining worlds works.
 - **A2** (confirmed in design): the host also creates plain generated RAM worlds. Disk-backed runtime worlds are out of scope.
 - **A3** (confirmed in design): older `create_temporary_world` siblings keep their derived clock, so removing a world whose clock others still share is rejected.
-- **A4** (**to confirm**): to let clones still join a temporary domain after its first world was removed, the domain's loot random sequences are held by the domain rather than by its first world. `worlds.toml` domains already do this in `DomainRandomSequences`.
+- **A4** (**rejected by the user, 2026-11-24**): the domain does not hold loot random sequences for temporary domains; they stay on the domain's default world, as today. Consequence: once a temporary domain has lost its first world, `ExistingDomain` into it fails with a clear message, because a new clone would have no sequences to share. The domain itself stays registered and `select_world` into its remaining worlds works.
 - **A5**: templates are written by the same Steel version that loads them. The format has no migrations at this stage of the project.
 - **A6**: the default game mode is not part of `level.toml`. Callers pass it per request; the world-cloner extension fills it from its per-template configuration.
 - **A7**: these host changes are shared by every extension. They are listed as platform gaps in [plan.md](plan.md), and the user decides who builds them and in what order.
