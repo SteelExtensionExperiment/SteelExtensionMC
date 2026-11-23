@@ -66,6 +66,7 @@ After loading it, an operator can obtain its item with `/give @s demo:token`.
 | `register_item(ItemDefinition)` | Registers an independent item with default item behavior. |
 | `register_block(BlockDefinition)` | Registers a block with selected vanilla geometry, without a placing item or default drops. Returns its default `BlockState`. |
 | `register_block_item(BlockItemDefinition)` | Registers the block, its placing item, and optional fixed self-drop together. Returns the block's default state. |
+| `register_block_with_behavior`, `register_block_item_with_behavior`, `register_textured_cube_with_behavior` | Register a custom block and its initial behavior with one call. |
 | `register_bed(BedDefinition)` | Registers a complete bed state family, its placing item, and state-selected models. Returns the bed's default state. |
 
 All registration methods return `ApiResult`. Invalid keys, duplicate entries,
@@ -164,10 +165,16 @@ Client sounds, cracks, particles, and targeting still follow the carrier.
 
 `drop_self: true` returns one placing item whenever drops are requested. It does
 not inherit vanilla explosion-decay loot; game-mode and drop-gamerule checks
-still apply. The lucky-block example uses `drop_self: false` with its own
-`player_destroy` callback for random item rewards and block traps. Install block
-callbacks during the later behavior registration hook using
-`Registry::replace_block_behavior`.
+still apply. The lucky-block example uses `drop_self: false` and
+`register_block_item_with_behavior(definition, create_behavior)` to install its own
+`player_destroy` callback for rewards and traps.
+
+Define the factory with `#[stabby::export(callback)]`. Its signature is
+`extern "C" fn(Registry<'_>, BlockState, OriginalBlockBehavior) -> ApiResult<DynBlockBehavior>`.
+Steel calls it after content freezes and passes the block's default state and
+the default behavior for delegation. A factory error fails extension startup.
+Behavior replacement hooks run afterward and can override an existing block
+with `Registry::replace_block_behavior`.
 
 ## Directional placement
 

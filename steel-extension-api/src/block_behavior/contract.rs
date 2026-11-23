@@ -41,10 +41,7 @@ macro_rules! block_behavior_contract {
                     /// Captures the implementation currently in the editable registry.
                     pub fn get(registry: &Registry<'_>, block: Str<'_>) -> ApiResult<Self> {
                         host::block_by_key(block.as_str()).map(|block| {
-                            let behavior = registry.host().behaviors.get_behavior_shared(block);
-                            // Captures and their borrowed capability views live as long
-                            // as extension callbacks; this runtime never unloads extensions.
-                            Self::from_host(Box::leak(Box::new(behavior)))
+                            Self::capture(registry.host().behaviors.get_behavior_shared(block))
                         }).map_err(ApiString::from).into()
                     }
                     $(

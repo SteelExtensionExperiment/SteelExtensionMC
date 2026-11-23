@@ -35,6 +35,14 @@ include!("schema.rs");
 
 pub use original::api::OriginalBlockBehavior;
 
+#[cfg(feature = "host")]
+impl OriginalBlockBehavior {
+    pub(crate) fn capture(behavior: Arc<dyn core_types::BlockBehavior>) -> Self {
+        // Captures and their borrowed capability views live as long as extension callbacks.
+        Self::from_host(Box::leak(Box::new(behavior)))
+    }
+}
+
 impl Copy for OriginalBlockBehavior {}
 #[expect(
     clippy::expl_impl_clone_on_copy,

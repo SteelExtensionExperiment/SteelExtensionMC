@@ -14,8 +14,10 @@ mod tests;
 use std::sync::{Arc, OnceLock};
 
 use glam::{Quat, Vec3};
+use steel_core::behavior::BlockBehaviorRegistry;
 use steel_registry::{
     Registry, RegistryExt,
+    blocks::BlockRef,
     client_content::{
         self, BedModel, BedRegistration, BlockDisplayTransform, BlockItemDisplay, PlacingItem,
     },
@@ -33,19 +35,43 @@ use steel_utils::{Identifier, UuidExt};
 use text_components::TextComponent;
 use uuid::Uuid;
 
-use super::HookRegistration;
+use super::{HookRegistration, Registration, lifecycle::ExtensionState};
 use crate::{
     ApiResult, BlockState,
+    block_behavior::{DynBlockBehavior, OriginalBlockBehavior, adapter::Adapter},
     content::{
         BedDefinition, BlockDefinition, BlockItemDefinition, ContentRegistry, HeadProfile,
         ItemAppearance, ItemDefinition, ItemDisplay, SlabMaterial,
     },
 };
-use stabby::vec::Vec as ApiVec;
+use stabby::{string::String as ApiString, vec::Vec as ApiVec};
+
+type BlockBehaviorFactory = extern "C" fn(
+    crate::Registry<'_>,
+    BlockState,
+    OriginalBlockBehavior,
+) -> ApiResult<DynBlockBehavior>;
 
 pub(crate) struct ContentRegistration<'a> {
     pub registry: &'a mut Registry,
     pub config: &'a str,
+    block_behaviors: &'a mut Vec<(BlockRef, BlockBehaviorFactory)>,
+}
+
+impl ContentRegistration<'_> {
+    pub(crate) fn register_block(
+        &mut self,
+        factory: Option<BlockBehaviorFactory>,
+        register: impl FnOnce(&mut Registry) -> Result<BlockRef, String>,
+    ) -> Result<BlockState, String> {
+        let block = register(self.registry)?;
+        if let Some(factory) = factory {
+            self.block_behaviors.push((block, factory));
+        }
+        Ok(BlockState {
+            id: self.registry.blocks.get_default_state_id(block).0,
+        })
+    }
 }
 
 pub(crate) fn subscribe(
@@ -56,17 +82,63 @@ pub(crate) fn subscribe(
     let extension = Arc::clone(hooks.extension);
     let result = client_content::on_registration(move |registry| {
         extension.run_registration("content", || {
-            let mut registration = ContentRegistration {
-                registry,
-                config: &extension.config,
-            };
-            callback(ContentRegistry::from_host(&mut registration))
+            register_content(registry, &extension, callback).into()
         });
     });
     if result.is_err() {
         hooks.extension.cancel_registration();
     }
     result
+}
+
+fn register_content(
+    registry: &mut Registry,
+    extension: &Arc<ExtensionState>,
+    callback: extern "C" fn(ContentRegistry<'_>) -> ApiResult<()>,
+) -> Result<(), ApiString> {
+    let mut block_behaviors = Vec::new();
+    let mut registration = ContentRegistration {
+        registry,
+        config: &extension.config,
+        block_behaviors: &mut block_behaviors,
+    };
+    callback(ContentRegistry::from_host(&mut registration)).match_owned(Ok, Err)?;
+    if block_behaviors.is_empty() {
+        return Ok(());
+    }
+
+    extension.begin_registration();
+    let owner = Arc::clone(extension);
+    let result = BlockBehaviorRegistry::on_content_registration(move |behaviors| {
+        owner.run_registration("custom block behavior", || {
+            install_block_behaviors(behaviors, &owner.config, block_behaviors)
+                .map_err(ApiString::from)
+                .into()
+        });
+    });
+    if result.is_err() {
+        extension.cancel_registration();
+    }
+    result.map_err(ApiString::from)
+}
+
+fn install_block_behaviors(
+    behaviors: &mut BlockBehaviorRegistry,
+    config: &str,
+    registrations: Vec<(BlockRef, BlockBehaviorFactory)>,
+) -> Result<(), String> {
+    for (block, factory) in registrations {
+        let original = OriginalBlockBehavior::capture(behaviors.get_behavior_shared(block));
+        let state = BlockState {
+            id: block.default_state().0,
+        };
+        let mut access = Registration { behaviors, config };
+        let behavior = factory(crate::Registry::from_host(&mut access), state, original)
+            .match_owned(Ok, Err)
+            .map_err(|error| format!("{}: {error}", block.key))?;
+        behaviors.set_behavior(block, Box::new(Adapter(behavior)));
+    }
+    Ok(())
 }
 
 pub(crate) fn register_item(
@@ -111,23 +183,17 @@ fn prepare_item(
 pub(crate) fn register_block(
     registry: &mut Registry,
     definition: BlockDefinition,
-) -> Result<BlockState, String> {
+) -> Result<BlockRef, String> {
     let definition = definition::prepare(registry, definition)?;
-    let block = registry.register_block_definition(definition, None)?;
-    Ok(BlockState {
-        id: registry.blocks.get_default_state_id(block).0,
-    })
+    registry.register_block_definition(definition, None)
 }
 
 pub(crate) fn register_block_item(
     registry: &mut Registry,
     definition: BlockItemDefinition,
-) -> Result<BlockState, String> {
+) -> Result<BlockRef, String> {
     let (block, placing) = prepare_block_item(registry, definition)?;
-    let block = registry.register_block_definition(block, Some(placing))?;
-    Ok(BlockState {
-        id: registry.blocks.get_default_state_id(block).0,
-    })
+    registry.register_block_definition(block, Some(placing))
 }
 
 fn prepare_block_item(

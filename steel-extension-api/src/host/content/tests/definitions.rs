@@ -2,7 +2,7 @@ use super::super::*;
 use crate::content::{BlockProperties, ItemAppearance, ItemDefinition, ItemDisplay, VoxelShape};
 use steel_registry::blocks::shapes::{BooleanOp, join_is_not_empty};
 use steel_registry::vanilla_blocks;
-use steel_utils::{BlockStateId, axis::Axis};
+use steel_utils::axis::Axis;
 
 #[test]
 fn independent_properties_and_equivalent_box_unions_project_without_a_template()
@@ -14,11 +14,7 @@ fn independent_properties_and_equivalent_box_unions_project_without_a_template()
             VoxelShape::box_shape(0.0, 0.0, 0.0, 8.0, 16.0, 16.0)
                 .or(VoxelShape::box_shape(8.0, 0.0, 0.0, 16.0, 16.0, 16.0)),
         );
-    let state = register_block(&mut registry, definition)?;
-    let block = registry
-        .blocks
-        .by_state_id(BlockStateId(state.id))
-        .ok_or("missing independent block")?;
+    let block = register_block(&mut registry, definition)?;
     let projected = registry
         .client_content
         .block(block)
@@ -76,14 +72,10 @@ fn unsupported_collision_requires_explicit_approximation_without_orphan_items() 
     assert!(registry.blocks.by_key(&key).is_none());
     assert!(registry.items.by_key(&key).is_none());
     assert_eq!(registry.blocks.next_state_id, count);
-    let state = register_block(
+    let block = register_block(
         &mut registry,
         vertical("defined:vertical").allow_approximation(),
     )?;
-    let block = registry
-        .blocks
-        .by_state_id(BlockStateId(state.id))
-        .ok_or("missing vertical")?;
     let projection = registry
         .client_content
         .block(block)

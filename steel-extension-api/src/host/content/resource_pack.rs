@@ -7,6 +7,7 @@ use serde_json::json;
 use sha1::{Digest as _, Sha1};
 use steel_registry::{
     Registry, RegistryExt,
+    blocks::BlockRef,
     client_content::PackHeadFallback,
     game_profile::ProfileProperty,
     resolvable_profile::{PartialProfile, PlayerSkinPatch, ResolvableProfile},
@@ -14,10 +15,7 @@ use steel_registry::{
 use steel_utils::Identifier;
 use uuid::Builder;
 
-use crate::{
-    BlockState,
-    content::{BlockItemDefinition, TextureFallback},
-};
+use crate::content::{BlockItemDefinition, TextureFallback};
 
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 
@@ -40,7 +38,7 @@ pub(crate) fn register_textured_cube(
     definition: BlockItemDefinition,
     png: &[u8],
     fallback: TextureFallback,
-) -> Result<BlockState, String> {
+) -> Result<BlockRef, String> {
     let model = definition
         .block
         .key
@@ -54,10 +52,7 @@ pub(crate) fn register_textured_cube(
     };
     let (block, placing) =
         super::prepare_block_item(registry, definition.with_cube_model(&model.to_string()))?;
-    let block = registry.register_textured_block_definition(block, placing, files, fallback)?;
-    Ok(BlockState {
-        id: registry.blocks.get_default_state_id(block).0,
-    })
+    registry.register_textured_block_definition(block, placing, files, fallback)
 }
 
 fn texture_path(model: &Identifier, category: &str) -> String {

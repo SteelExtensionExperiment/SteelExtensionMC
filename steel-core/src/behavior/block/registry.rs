@@ -11,8 +11,17 @@ use steel_registry::{
 use steel_utils::locks::SyncMutex;
 
 type RegistrationHook = Box<dyn FnOnce(&mut BlockBehaviorRegistry) + Send>;
-static REGISTRATION_HOOKS: SyncMutex<Option<Vec<RegistrationHook>>> =
-    SyncMutex::new(Some(Vec::new()));
+
+struct RegistrationHooks {
+    content: Vec<RegistrationHook>,
+    replacements: Vec<RegistrationHook>,
+}
+
+static REGISTRATION_HOOKS: SyncMutex<Option<RegistrationHooks>> =
+    SyncMutex::new(Some(RegistrationHooks {
+        content: Vec::new(),
+        replacements: Vec::new(),
+    }));
 
 /// Default placement plus the common water tick used by unported waterlogged blocks.
 pub struct DefaultBlockBehavior {
@@ -81,20 +90,32 @@ pub struct BlockBehaviorRegistry {
 }
 
 impl BlockBehaviorRegistry {
+    /// Installs behaviors for newly registered content before replacement hooks run.
+    pub fn on_content_registration(
+        hook: impl FnOnce(&mut Self) + Send + 'static,
+    ) -> Result<(), String> {
+        let mut hooks = REGISTRATION_HOOKS.lock();
+        let Some(hooks) = hooks.as_mut() else {
+            return Err("block behavior registration has already finished".into());
+        };
+        hooks.content.push(Box::new(hook));
+        Ok(())
+    }
+
     /// Subscribes before initialization; the callback edits the live registry before freezing.
     pub fn on_registration(hook: impl FnOnce(&mut Self) + Send + 'static) -> Result<(), String> {
         let mut hooks = REGISTRATION_HOOKS.lock();
         let Some(hooks) = hooks.as_mut() else {
             return Err("block behavior registration has already finished".into());
         };
-        hooks.push(Box::new(hook));
+        hooks.replacements.push(Box::new(hook));
         Ok(())
     }
 
     pub(crate) fn run_registration_hooks(&mut self) {
         let hooks = REGISTRATION_HOOKS.lock().take();
         if let Some(hooks) = hooks {
-            for hook in hooks {
+            for hook in hooks.content.into_iter().chain(hooks.replacements) {
                 hook(self);
             }
         }

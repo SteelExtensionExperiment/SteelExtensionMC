@@ -1,7 +1,6 @@
 use super::*;
 use crate::content::{BlockProperties, BlockProperty, BlockStateDefinition};
 use steel_registry::vanilla_blocks;
-use steel_utils::BlockStateId;
 
 fn definition(properties: &[(&str, &str)]) -> BlockDefinition {
     BlockDefinition::new("geometry_test:slab")
@@ -21,11 +20,7 @@ fn definition(properties: &[(&str, &str)]) -> BlockDefinition {
 #[test]
 fn native_definition_resolves_properties_over_vanilla_defaults() -> Result<(), String> {
     let mut registry = Registry::new_vanilla();
-    let state = register_block(&mut registry, definition(&[("type", "top")]))?;
-    let block = registry
-        .blocks
-        .by_state_id(BlockStateId(state.id))
-        .ok_or("missing block")?;
+    let block = register_block(&mut registry, definition(&[("type", "top")]))?;
     let selected = registry
         .client_content
         .block(block)

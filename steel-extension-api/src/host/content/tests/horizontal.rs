@@ -10,17 +10,13 @@ use steel_utils::BlockStateId;
 #[test]
 fn horizontal_geometry_matches_extracted_stairs_in_every_shape_channel() -> Result<(), String> {
     let mut registry = Registry::new_vanilla();
-    let state = register_block(
+    let block = register_block(
         &mut registry,
         BlockDefinition::new("facing:chair")
             .properties(BlockProperties::of_full_copy("minecraft:oak_planks"))
             .vanilla_geometry("minecraft:oak_stairs".into())
             .horizontal_facing(HorizontalPlacement::Player),
     )?;
-    let block = registry
-        .blocks
-        .by_state_id(BlockStateId(state.id))
-        .ok_or("missing chair")?;
     let model = registry
         .client_content
         .block(block)

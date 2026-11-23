@@ -4,7 +4,8 @@ pub mod api {
     #[cfg(feature = "host")]
     use crate::host::content::{self, ContentRegistration};
     use crate::{
-        ApiResult, BlockState,
+        ApiResult, BlockState, Registry,
+        block_behavior::{DynBlockBehavior, OriginalBlockBehavior},
         content::{
             BedDefinition, BiomeDefinition, BlockDefinition, BlockItemDefinition, EntityDefinition,
             FluidDefinition, ItemDefinition, RegisteredFluid, SlabMaterial, TextureFallback,
@@ -87,14 +88,44 @@ pub mod api {
             png: Slice<'_, u8>,
             fallback: TextureFallback,
         ) -> ApiResult<BlockState> {
-            content::resource_pack::register_textured_cube(
-                self.host_mut().registry,
-                definition,
-                png.as_slice(),
-                fallback,
-            )
-            .map_err(ApiString::from)
-            .into()
+            self.host_mut()
+                .register_block(None, |registry| {
+                    content::resource_pack::register_textured_cube(
+                        registry,
+                        definition,
+                        png.as_slice(),
+                        fallback,
+                    )
+                })
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Registers a textured cube with its placing item and custom behavior.
+        /// The factory runs after content freezes and receives the registry, the
+        /// block's default state, and its default behavior for delegation.
+        pub fn register_textured_cube_with_behavior(
+            &mut self,
+            definition: BlockItemDefinition,
+            png: Slice<'_, u8>,
+            fallback: TextureFallback,
+            factory: extern "C" fn(
+                Registry<'_>,
+                BlockState,
+                OriginalBlockBehavior,
+            ) -> ApiResult<DynBlockBehavior>,
+        ) -> ApiResult<BlockState> {
+            self.host_mut()
+                .register_block(Some(factory), |registry| {
+                    content::resource_pack::register_textured_cube(
+                        registry,
+                        definition,
+                        png.as_slice(),
+                        fallback,
+                    )
+                })
+                .map_err(ApiString::from)
+                .into()
         }
 
         /// Uses a Minecraft head as the no-pack fallback for a contributed item model.
@@ -119,7 +150,29 @@ pub mod api {
 
         /// Registers a block without a placing item or default loot table.
         pub fn register_block(&mut self, definition: BlockDefinition) -> ApiResult<BlockState> {
-            content::register_block(self.host_mut().registry, definition)
+            self.host_mut()
+                .register_block(None, |registry| {
+                    content::register_block(registry, definition)
+                })
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Registers a block and its custom behavior without a placing item.
+        /// The factory runs after content freezes, before behavior replacement hooks.
+        pub fn register_block_with_behavior(
+            &mut self,
+            definition: BlockDefinition,
+            factory: extern "C" fn(
+                Registry<'_>,
+                BlockState,
+                OriginalBlockBehavior,
+            ) -> ApiResult<DynBlockBehavior>,
+        ) -> ApiResult<BlockState> {
+            self.host_mut()
+                .register_block(Some(factory), |registry| {
+                    content::register_block(registry, definition)
+                })
                 .map_err(ApiString::from)
                 .into()
         }
@@ -153,7 +206,30 @@ pub mod api {
             &mut self,
             definition: BlockItemDefinition,
         ) -> ApiResult<BlockState> {
-            content::register_block_item(self.host_mut().registry, definition)
+            self.host_mut()
+                .register_block(None, |registry| {
+                    content::register_block_item(registry, definition)
+                })
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Registers a block, its placing item, optional self-drop, and custom behavior.
+        /// The factory receives the block's default state and behavior, including placement
+        /// and self-drop, and runs before behavior replacement hooks.
+        pub fn register_block_item_with_behavior(
+            &mut self,
+            definition: BlockItemDefinition,
+            factory: extern "C" fn(
+                Registry<'_>,
+                BlockState,
+                OriginalBlockBehavior,
+            ) -> ApiResult<DynBlockBehavior>,
+        ) -> ApiResult<BlockState> {
+            self.host_mut()
+                .register_block(Some(factory), |registry| {
+                    content::register_block_item(registry, definition)
+                })
                 .map_err(ApiString::from)
                 .into()
         }
