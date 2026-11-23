@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-23
 
-**Status**: Draft
+**Status**: Implemented on `host/006-text-holograms` (merged into the main checkout as `e22f2e44`); T011 open, see tasks.md. Contract change "hologram text never fails" (shared `parse_text`, malformed JSON shows as plain text): approval relayed by the coordinator session on 2026-11-24 (not confirmed directly in the host-006 session).
 
 **Input**: Needed by the `stats-visualizer` extension (`extension-example/stats-visualizer/specs/001-stats-visualizer/`):
 a scoreboard that floats over blocks and whose text an extension can change at any time. Extensions have

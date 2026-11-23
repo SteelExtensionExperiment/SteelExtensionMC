@@ -52,7 +52,7 @@ description: "Task list for the extension hologram host platform"
 ## Phase 5: Polish
 
 - [x] T010 [P] Document the bindings and the lifecycle rules in `doc/extensions/api.md`, including that extensions recreate holograms on `on_world_load`.
-- [ ] T011 [P] Run `cargo clippy -r --workspace --all-targets --all-features`, `cargo fmt --all --check`, `typos`, and the manual check in [quickstart.md](quickstart.md).
+- [ ] T011 [P] **OPEN, not done.** Run `cargo clippy -r --workspace --all-targets --all-features`, `cargo fmt --all --check`, `typos`, and the manual check in [quickstart.md](quickstart.md).
 
 ---
 
@@ -66,3 +66,9 @@ description: "Task list for the extension hologram host platform"
 
 **MVP**: T001–T007. After that the stats board can create and update holograms. T008–T009 prove the
 lifecycle. The `stats-visualizer` tasks T006, T008 and T009 wait on T007.
+
+## Open items (2026-11-24)
+
+- **T011 not done**: workspace clippy (`cargo clippy -r --workspace --all-targets --all-features`) was not run; only per-crate clippy on `steel-core` and `steel-extension-api`, with no new warnings in this stream's code. The [quickstart.md](quickstart.md) manual check was not run. `typos` flags `canceller` in `steel-core/src/extension/events/tests.rs:66`, a file this stream did not touch.
+- **Known limits**: a hologram entity removed by other means (`/kill`) while its chunk stays loaded is not respawned until the chunk reloads. A cancelled `entity_spawn` event leaves the record without an entity (warning logged, retried on next chunk load) while `create_hologram` still returns `Ok`. SC-001 was checked on RAM-only storage, not region files on disk.
+- **Merge**: commit `519acbb9` fixes steel-core test files that host-005 may also have fixed; the coordinator resolves any conflict.
