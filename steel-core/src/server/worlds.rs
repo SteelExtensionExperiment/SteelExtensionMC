@@ -235,6 +235,18 @@ impl WorldMap {
             .collect::<Vec<_>>()
             .into_iter()
     }
+    /// Takes a snapshot of every domain's default world. Domain-level saved data (scoreboard,
+    /// command storage) is written through these worlds only; other worlds, including runtime
+    /// worlds that own their clock, never consume it.
+    #[must_use]
+    pub(crate) fn domain_default_worlds(&self) -> Vec<Arc<World>> {
+        let state = self.state.read();
+        state
+            .default_worlds
+            .values()
+            .filter_map(|key| state.worlds.get(key).map(Arc::clone))
+            .collect()
+    }
     /// Returns a domain's primary world.
     #[must_use]
     pub fn default_world(&self, domain: &str) -> Option<Arc<World>> {
@@ -313,6 +325,31 @@ fn end_entry_portal_target_world_name(source: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::{end_entry_portal_target_world_name, nether_portal_target_world_name};
+
+    #[test]
+    fn domain_saved_data_targets_only_default_worlds() {
+        use super::WorldMap;
+        use crate::config::ResolvedDomainConfig;
+        use crate::test_support::fresh_test_world_in_domain;
+        use steel_utils::Identifier;
+
+        let default = fresh_test_world_in_domain("saved_targets", "overworld");
+        let clock_owner = fresh_test_world_in_domain("saved_targets", "clone");
+        assert!(clock_owner.world.level_data.read().owns_game_time());
+        let domain = ResolvedDomainConfig {
+            name: "saved_targets".to_owned(),
+            default_world: Identifier::new_static("saved_targets", "overworld"),
+            worlds: vec![default.world.key.clone(), clock_owner.world.key.clone()],
+        };
+        let mut worlds = WorldMap::new("saved_targets".to_owned(), &[domain], &[]);
+        worlds.insert(clock_owner.world.key.clone(), clock_owner.world.clone());
+        worlds.insert(default.world.key.clone(), default.world.clone());
+
+        let targets = worlds.domain_default_worlds();
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].key, default.world.key);
+    }
 
     #[test]
     fn domain_uuid_lookup_excludes_replaced_worlds_without_retaining_worlds() {
