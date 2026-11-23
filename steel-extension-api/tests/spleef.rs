@@ -19,7 +19,10 @@ use steel_core::{
     command::{CommandRegistry, sender::CommandSender},
     config::{ResolvedDomainConfig, RuntimeConfig},
     entity::{Entity, LivingEntity, damage::DamageHistory, next_entity_id},
-    extension::{ExtensionHooks, RegisteredExtensions},
+    extension::{
+        ExtensionHooks, RegisteredExtensions,
+        events::{EventHandler, EventPriority, WorldUnloadEvent},
+    },
     level_data::{GameTimeSource, WorldGenerationSettings},
     permission::PermissionSubjectIndex,
     player::{
@@ -169,6 +172,17 @@ impl Drop for CancelOnDrop {
         self.0.cancel();
     }
 }
+
+struct ObserveCancelledLobby(Arc<AtomicBool>);
+
+impl EventHandler<WorldUnloadEvent> for ObserveCancelledLobby {
+    fn handle(&self, event: &mut WorldUnloadEvent, _: EventPriority) {
+        if event.world == Identifier::new_static("spleef_2", "lobby") {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+}
+
 struct OnTick<F>(Option<F>);
 impl<F: FnOnce() + Send> ServerJob for OnTick<F> {
     fn poll(&mut self, _: &mut ServerJobContext) -> JobPoll {
@@ -218,26 +232,41 @@ async fn until(
     clippy::too_many_lines,
     reason = "the independent native boundary needs one continuous room lifecycle before process-global teardown"
 )]
-#[ignore = "requires cargo build --manifest-path extension-example/spleef/Cargo.toml"]
+#[ignore = "requires building the Minigame and Spleef native extensions"]
 fn solo_spleef_creates_lobby_and_arena_fills_bots_restores_state_and_releases_worlds()
 -> Result<(), String> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../extension-example/spleef/target/debug")
-        .join(format!("{DLL_PREFIX}steel_spleef_extension{DLL_SUFFIX}"));
+    let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../extension-example");
+    let sources = [
+        host::ExtensionSource {
+            path: examples
+                .join("spleef/target/debug")
+                .join(format!("{DLL_PREFIX}steel_spleef_extension{DLL_SUFFIX}")),
+            config: Some("lobby_seconds=1\nround_seconds=10\nending_seconds=1\nplayers=4\n".into()),
+        },
+        host::ExtensionSource {
+            path: examples
+                .join("minigame/target/debug")
+                .join(format!("{DLL_PREFIX}steel_minigame_extension{DLL_SUFFIX}")),
+            config: Some(String::new()),
+        },
+    ];
     let mut hooks = ExtensionHooks::default();
-    // SAFETY: the independently built example honors the checked v3 entrypoints;
-    // the loader pins it for the lifetime of every callback.
-    let extension = unsafe {
-        host::load(
-            &path,
-            "lobby_seconds=1\nround_seconds=10\nending_seconds=1\nplayers=4\n",
-            &mut hooks,
-        )
-    }?;
+    let cancelled_lobby = Arc::new(AtomicBool::new(false));
+    hooks.events.world_unload.subscribe(
+        EventPriority::Monitor,
+        false,
+        Box::new(ObserveCancelledLobby(Arc::clone(&cancelled_lobby))),
+    );
+    let data_root = tempfile::tempdir().map_err(|error| error.to_string())?;
+    // SAFETY: both independently built examples honor the checked v4 contract.
+    // The loader pins both libraries for the lifetime of their callbacks and room objects.
+    let loaded = unsafe { host::load_all(&sources, data_root.path(), &mut hooks) }?;
+    assert!(loaded.skipped.is_empty(), "{:?}", loaded.skipped);
     init_globals();
     let mut extensions = RegisteredExtensions::new_with_builtins()?;
     let commands = CommandRegistry::new().freeze()?;
-    host::initialize_all(vec![extension], &extension_data_root(), &mut hooks)?;
+    let initialized = host::initialize_all(loaded.extensions, data_root.path(), &mut hooks)?;
+    assert_eq!(initialized.names(), ["minigame", "spleef-example"]);
     extensions.hooks = hooks;
     let fixture = Fixture::new()?;
     let runtime = Arc::clone(&fixture.runtime);
@@ -311,6 +340,7 @@ fn solo_spleef_creates_lobby_and_arena_fills_bots_restores_state_and_releases_wo
             .submit_command(
                 CommandSender::Player(Arc::clone(&player)),
                 "spleef join".into(),
+                None,
             )
             .map_err(|_| "command queue full")?;
         until(&player, "lobby with three bots", || {
@@ -453,19 +483,22 @@ fn solo_spleef_creates_lobby_and_arena_fills_bots_restores_state_and_releases_wo
             .submit_command(
                 CommandSender::Player(Arc::clone(&player)),
                 "spleef join".into(),
+                None,
             )
             .map_err(|_| "command queue full")?;
         server
             .submit_command(
                 CommandSender::Player(Arc::clone(&player)),
                 "spleef leave".into(),
+                None,
             )
             .map_err(|_| "command queue full")?;
-        sleep(Duration::from_millis(250)).await;
-        until(&player, "cancelled lobby cleanup", || {
-            server.worlds.len() == 1 && player.get_world().key == home.key
+        until(&player, "cancelled lobby retirement", || {
+            cancelled_lobby.load(Ordering::Acquire)
         })
         .await?;
+        assert_eq!(server.worlds.len(), 1);
+        assert_eq!(player.get_world().key, home.key);
         server.cancel_token.cancel();
         task.await.map_err(|e| e.to_string())?;
         home.chunk_map.stop_generation_refill_loop();
@@ -473,8 +506,4 @@ fn solo_spleef_creates_lobby_and_arena_fills_bots_restores_state_and_releases_wo
         home.chunk_map.task_tracker.wait().await;
         Ok(())
     })
-}
-
-fn extension_data_root() -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("steel-extension-api-tests-{}", std::process::id()))
 }
