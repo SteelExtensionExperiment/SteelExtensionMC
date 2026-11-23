@@ -19,6 +19,7 @@ pub mod tick_rate_manager;
 mod world_tick_workers;
 use crate::worldgen::WorldGeneratorRegistry;
 /// Domain-aware loaded world map.
+pub mod world_operations;
 pub mod worlds;
 
 use crate::bootstrap::init_globals;
@@ -306,6 +307,7 @@ pub async fn test_server_with_worlds_and_config(
 
     Ok(Arc::new(Server {
         temporary_worlds: temporary::TemporaryWorlds::default(),
+        world_operations: world_operations::WorldOperations::default(),
         world_generators,
         extensions,
         damage_history,
@@ -529,6 +531,7 @@ use jobs::teleport::{
 /// The main server struct.
 pub struct Server {
     temporary_worlds: temporary::TemporaryWorlds,
+    world_operations: world_operations::WorldOperations,
     world_generators: WorldGeneratorRegistry,
     extensions: Arc<Extensions>,
     pub(crate) damage_history: Arc<DamageHistory>,
@@ -976,6 +979,7 @@ impl Server {
 
         Ok(Server {
             temporary_worlds: temporary::TemporaryWorlds::default(),
+            world_operations: world_operations::WorldOperations::default(),
             world_generators: generator_registry,
             extensions,
             damage_history,

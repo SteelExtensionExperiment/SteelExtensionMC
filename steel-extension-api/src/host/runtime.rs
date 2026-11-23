@@ -19,7 +19,8 @@ use steel_core::{
     player::{Player, PlayerInput, bot::BotInput as CoreBotInput, connection::NetworkConnection},
     server::{
         Server as CoreServer,
-        temporary::{TemporaryWorldRequest, WorldOperationId},
+        temporary::TemporaryWorldRequest,
+        world_operations::WorldOperationId,
     },
 };
 use steel_registry::{REGISTRY, RegistryExt, item_stack::ItemStack};

@@ -3,6 +3,7 @@
 use super::{
     PlayerAdmissionState, Server,
     jobs::{JobPoll, ServerJob, ServerJobContext},
+    world_operations::WorldOperationId,
 };
 use crate::{
     chunk::chunk_request::ChunkRequestHandle, level_data::GameTimeSource,
@@ -20,9 +21,6 @@ use steel_utils::{
     types::{Difficulty, GameType},
 };
 
-/// Identity of an asynchronous world operation, consumed when its result is read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WorldOperationId(pub u64);
 /// A world prepared using a registered generator, with no disk-backed state.
 pub struct TemporaryWorldRequest {
     /// Unique `domain:world` identity.
@@ -49,8 +47,6 @@ pub(super) struct TemporaryWorlds {
 }
 #[derive(Default)]
 struct State {
-    next: u64,
-    operations: FxHashMap<WorldOperationId, Option<Result<Identifier, String>>>,
     domains: FxHashMap<String, DomainState>,
 }
 struct DomainState {
@@ -59,20 +55,6 @@ struct DomainState {
     spawn_tickets: Vec<ChunkRequestHandle>,
 }
 impl TemporaryWorlds {
-    fn allocate(state: &mut State) -> Result<WorldOperationId, String> {
-        state.next = state
-            .next
-            .checked_add(1)
-            .ok_or("world operation identities exhausted")?;
-        let id = WorldOperationId(state.next);
-        state.operations.insert(id, None);
-        Ok(id)
-    }
-    fn finish(&self, id: WorldOperationId, result: Result<Identifier, String>) {
-        if let Some(slot) = self.state.lock().operations.get_mut(&id) {
-            *slot = Some(result);
-        }
-    }
     pub(super) fn is_closing(&self, domain: &str) -> bool {
         self.state
             .lock()
@@ -147,7 +129,7 @@ impl Server {
                 }
                 entry.creating += 1;
             }
-            TemporaryWorlds::allocate(&mut state)?
+            self.world_operations.allocate()?
         };
         let primary = request.primary;
         let (sender, receiver) = mpsc::channel();
@@ -174,23 +156,6 @@ impl Server {
         });
         Ok(id)
     }
-    /// Reads and consumes a completed operation. `None` means its job is still running.
-    pub fn take_world_operation(
-        &self,
-        id: WorldOperationId,
-    ) -> Result<Option<Result<Identifier, String>>, String> {
-        let mut state = self.temporary_worlds.state.lock();
-        let slot = state
-            .operations
-            .get_mut(&id)
-            .ok_or("unknown or consumed world operation")?;
-        if slot.is_none() {
-            return Ok(None);
-        }
-        let result = slot.take();
-        state.operations.remove(&id);
-        Ok(result)
-    }
     /// Retires a temporary domain once all players and domain transitions have left it.
     /// No new entries are accepted after this call.
     pub fn destroy_temporary_domain(
@@ -207,7 +172,7 @@ impl Server {
                 return Err("domain is already closing".into());
             }
             entry.closing = true;
-            TemporaryWorlds::allocate(&mut state)?
+            self.world_operations.allocate()?
         };
         self.jobs.spawn(DestroyDomainJob {
             server: Arc::downgrade(self),
@@ -287,7 +252,7 @@ impl ServerJob for CreateWorldJob {
                 .player_data_storage
                 .retire_temporary_domain(&self.domain);
         }
-        server.temporary_worlds.finish(self.id, result);
+        server.world_operations.finish(self.id, result);
         JobPoll::Finished
     }
     fn cancel(&mut self) {
@@ -301,7 +266,7 @@ impl ServerJob for CreateWorldJob {
             }
             drop(state);
             server
-                .temporary_worlds
+                .world_operations
                 .finish(self.id, Err("temporary world creation cancelled".into()));
         }
     }
@@ -371,7 +336,7 @@ impl ServerJob for DestroyDomainJob {
                 // The entire RAM world is discarded; serializing chunks would only retain it longer.
             }
             server
-                .temporary_worlds
+                .world_operations
                 .finish(id, Ok(Identifier::new(domain, "retired")));
         });
         JobPoll::Finished
@@ -388,7 +353,7 @@ impl ServerJob for DestroyDomainJob {
                 domain.closing = false;
             }
             server
-                .temporary_worlds
+                .world_operations
                 .finish(self.id, Err("temporary domain retirement cancelled".into()));
         }
     }
