@@ -240,3 +240,109 @@ fn seed_override_needs_an_empty_generator_template() -> Result<(), String> {
         Ok(())
     })
 }
+
+#[test]
+fn clone_joins_a_lasting_domain_and_refuses_missing_or_closing_domains() -> Result<(), String> {
+    init_globals();
+    let fixture = fresh_test_world("clone_lasting_home");
+    let home = &fixture.world;
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    runtime.block_on(async {
+        let domain = ResolvedDomainConfig {
+            name: home.domain().to_owned(),
+            default_world: home.key.clone(),
+            worlds: vec![home.key.clone()],
+        };
+        let server = test_server_with_worlds_and_config(
+            domain.name.clone(),
+            from_ref(&domain),
+            from_ref(home),
+            PermissionSubjectIndex::new(),
+            test_runtime_config(16),
+            None,
+        )
+        .await?;
+        let template_key = Identifier::new_static("clone_test", "template");
+        server.register_ready_template(chest_template(
+            template_key.clone(),
+            Identifier::from_steel("empty"),
+        ));
+        let overrides = CloneOverrides {
+            spawn: Some(BlockPos::new(0, 80, 0)),
+            ..CloneOverrides::default()
+        };
+
+        let lasting_key = Identifier::new(home.domain().to_owned(), "clone".to_owned());
+        let id = server.clone_world(
+            &template_key,
+            lasting_key.clone(),
+            DomainTarget::Existing,
+            overrides,
+        )?;
+        finish(&server, id).await?;
+        let clone = server
+            .worlds
+            .get(&lasting_key)
+            .ok_or("clone not published")?;
+        assert!(clone.level_data.read().owns_game_time());
+        assert!(!Arc::ptr_eq(&clone.game_time, &home.game_time));
+        assert!(Arc::ptr_eq(
+            clone
+                .random_sequences
+                .read()
+                .as_ref()
+                .ok_or("clone has no random sequences")?,
+            home.random_sequences
+                .read()
+                .as_ref()
+                .ok_or("home has no random sequences")?,
+        ));
+        assert_eq!(
+            server
+                .worlds
+                .default_world(home.domain())
+                .map(|w| w.key.clone()),
+            Some(home.key.clone())
+        );
+        assert!(
+            server.destroy_temporary_domain(home.domain()).is_err(),
+            "a lasting domain is never destroyed"
+        );
+
+        assert!(
+            server
+                .clone_world(
+                    &template_key,
+                    Identifier::new_static("nowhere", "arena"),
+                    DomainTarget::Existing,
+                    overrides
+                )
+                .is_err(),
+            "a domain that is not loaded is refused"
+        );
+
+        let temporary = Identifier::new_static("clone_closing", "arena");
+        let id = server.clone_world(
+            &template_key,
+            temporary.clone(),
+            DomainTarget::NewTemporary,
+            overrides,
+        )?;
+        finish(&server, id).await?;
+        let destroy = server.destroy_temporary_domain("clone_closing")?;
+        let error = server
+            .clone_world(
+                &template_key,
+                Identifier::new_static("clone_closing", "second"),
+                DomainTarget::Existing,
+                overrides,
+            )
+            .expect_err("a closing domain refuses new worlds");
+        assert!(error.contains("closing"), "{error}");
+        finish(&server, destroy).await?;
+        Ok(())
+    })
+}

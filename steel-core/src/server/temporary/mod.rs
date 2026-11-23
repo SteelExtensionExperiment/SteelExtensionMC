@@ -106,26 +106,35 @@ impl Server {
         if !(dimension.min_y..dimension.min_y + dimension.height).contains(&request.spawn.y()) {
             return Err("spawn is outside the dimension build height".into());
         }
-        let (game_time_source, random_sequences) = if primary {
-            (
+        let (game_time_source, random_sequences) = match request.target {
+            DomainTarget::NewTemporary => (
                 GameTimeSource::Primary,
                 Arc::new(RandomSequences::new(request.seed)),
-            )
-        } else {
-            let primary = self
-                .worlds
-                .default_world(&domain)
-                .ok_or("temporary domain is not loaded")?;
-            let sequences = primary
-                .random_sequences
-                .read()
-                .as_ref()
-                .map(Arc::clone)
-                .ok_or("temporary domain has no loot random sequences")?;
-            (
-                GameTimeSource::Derived(Arc::clone(&primary.game_time)),
-                sequences,
-            )
+            ),
+            DomainTarget::TemporarySibling | DomainTarget::Existing => {
+                if !self.worlds.has_domain(&domain) {
+                    return Err(format!("domain {domain} is not loaded"));
+                }
+                // A temporary domain keeps its loot random sequences on its default world, so a
+                // domain whose default world was removed cannot take new worlds.
+                let default = self.worlds.default_world(&domain).ok_or_else(|| {
+                    format!(
+                        "domain {domain} has no default world, so it has no loot random sequences to share"
+                    )
+                })?;
+                let sequences = default
+                    .random_sequences
+                    .read()
+                    .as_ref()
+                    .map(Arc::clone)
+                    .ok_or("domain has no loot random sequences")?;
+                let clock = if request.target == DomainTarget::Existing {
+                    GameTimeSource::Primary
+                } else {
+                    GameTimeSource::Derived(Arc::clone(&default.game_time))
+                };
+                (clock, sequences)
+            }
         };
         let id = {
             let mut state = self.temporary_worlds.state.lock();
@@ -137,12 +146,15 @@ impl Server {
                     return Err("domain identity is already in use".into());
                 }
             } else {
-                let entry = state
-                    .domains
-                    .get(&domain)
-                    .ok_or("worlds can only be added to temporary domains")?;
-                if entry.closing {
-                    return Err("temporary domain is closing".into());
+                // Lasting domains have no entry here; they are never closed.
+                match state.domains.get(&domain) {
+                    Some(entry) if entry.closing => {
+                        return Err("temporary domain is closing".into());
+                    }
+                    None if request.target == DomainTarget::TemporarySibling => {
+                        return Err("worlds can only be added to temporary domains".into());
+                    }
+                    _ => {}
                 }
             }
             let id = self.world_operations.allocate()?;

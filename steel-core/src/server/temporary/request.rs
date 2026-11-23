@@ -41,6 +41,9 @@ pub enum DomainTarget {
     /// Additional world of a temporary domain with a clock derived from the domain default
     /// world. Only `create_temporary_world` uses this.
     TemporarySibling,
+    /// Additional world of a loaded domain, lasting or temporary and not closing. It owns its
+    /// clock and shares the domain's loot random sequences, so the domain needs a default world.
+    Existing,
 }
 
 /// A RAM-only world to prepare and publish at a tick boundary.
