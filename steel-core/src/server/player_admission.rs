@@ -279,6 +279,11 @@ impl Server {
             return;
         }
 
+        if state.world.is_retiring() {
+            self.release_player_admission(uuid, PlayerAdmissionState::Joining);
+            player.disconnect("The world you were joining was removed");
+            return;
+        }
         self.apply_cached_or_default_permission_state(&player);
         Self::apply_domain_player_state(&player, &state);
         self.send_login_packet(&player, &state.world);

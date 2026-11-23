@@ -258,6 +258,7 @@ impl WorldSpawnTeleportJob {
                 .is_some_and(|world| Arc::ptr_eq(&world, &self.source_world))
             && self.source_world.contains_player(player)
             && self.source_world.domain() == self.target_world.domain()
+            && !self.target_world.is_retiring()
             && server
                 .worlds
                 .get(&self.target_world.key)

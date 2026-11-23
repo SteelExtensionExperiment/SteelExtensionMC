@@ -242,7 +242,11 @@ impl Server {
         {
             return None;
         }
-        let Some(saved_world) = self.worlds.get(&saved_world_key) else {
+        let Some(saved_world) = self
+            .worlds
+            .get(&saved_world_key)
+            .filter(|world| !world.is_retiring())
+        else {
             log::warn!(
                 "Saved world {saved_world_key} for player {player_name} is missing, using target spawn"
             );

@@ -405,6 +405,9 @@ impl Server {
             .get(&target_world.key)
             .filter(|registered| Arc::ptr_eq(registered, target_world))
             .ok_or_else(|| "target world is not the registered loaded world".to_owned())?;
+        if target_world.is_retiring() {
+            return Err("target world is being removed".into());
+        }
         let target_domain = target_world.domain().to_owned();
         if self.temporary_worlds.is_closing(&target_domain) {
             return Err("temporary domain is closing".into());
@@ -464,6 +467,15 @@ impl Server {
         }
         if !self.worlds.has_domain(&target_domain) {
             return Err(format!("unknown domain {target_domain}"));
+        }
+        if self
+            .worlds
+            .default_world(&target_domain)
+            .is_none_or(|world| world.is_retiring())
+        {
+            return Err(format!(
+                "domain {target_domain} has no default world to enter"
+            ));
         }
 
         let (current_world, pending_token) = self.begin_player_relocation(&player)?;
@@ -544,6 +556,9 @@ impl Server {
                 .ok_or_else(|| "target world is no longer loaded".to_owned())?;
             if !Arc::ptr_eq(&registered, target_world) || target_world.domain() != target_domain {
                 return Err("target world registration changed before the switch".to_owned());
+            }
+            if target_world.is_retiring() {
+                return Err("target world is being removed".to_owned());
             }
         }
 

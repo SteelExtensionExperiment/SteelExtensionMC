@@ -29,7 +29,7 @@ const CHEST_POS: BlockPos = BlockPos::new(3, 64, 5);
 const SECTION_HEIGHT: i32 = 16;
 
 /// One saved chunk at (0, 0) holding a chest, as an overworld-height template.
-fn chest_template(key: Identifier, generator: Identifier) -> Arc<WorldTemplate> {
+pub(super) fn chest_template(key: Identifier, generator: Identifier) -> Arc<WorldTemplate> {
     let section_count = (OVERWORLD.height / SECTION_HEIGHT) as usize;
     let chunk = Chunk::new(
         Sections::from_owned(

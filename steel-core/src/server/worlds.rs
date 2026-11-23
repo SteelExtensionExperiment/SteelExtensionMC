@@ -329,6 +329,7 @@ impl WorldMap {
             source.domain().to_owned(),
             name.to_owned(),
         ))
+        .filter(|target| !target.is_retiring())
     }
     /// Resolves a Nether portal destination.
     #[must_use]
@@ -340,7 +341,7 @@ impl WorldMap {
             .get(&source.key)
             .cloned();
         if let Some(target) = target {
-            return self.get(&target);
+            return self.get(&target).filter(|world| !world.is_retiring());
         }
         self.resolve_portal_target(
             source,
@@ -357,7 +358,7 @@ impl WorldMap {
             .get(&source.key)
             .cloned();
         if let Some(target) = target {
-            return self.get(&target);
+            return self.get(&target).filter(|world| !world.is_retiring());
         }
         end_entry_portal_target_world_name(source.key.path.as_ref())
             .and_then(|name| self.resolve_portal_target(source, name))

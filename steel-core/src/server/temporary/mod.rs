@@ -381,10 +381,7 @@ impl ServerJob for DestroyDomainJob {
         let domain = self.domain.clone();
         server.temporary_worlds.cleanup.clone().spawn(async move {
             for world in worlds {
-                world.chunk_map.stop_generation_refill_loop();
-                world.chunk_map.task_tracker.close();
-                world.chunk_map.task_tracker.wait().await;
-                // The entire RAM world is discarded; serializing chunks would only retain it longer.
+                world.retire_runtime().await;
             }
             server
                 .world_operations
@@ -412,5 +409,7 @@ impl ServerJob for DestroyDomainJob {
 
 #[cfg(test)]
 mod clone_tests;
+#[cfg(test)]
+mod removal_tests;
 #[cfg(test)]
 mod tests;

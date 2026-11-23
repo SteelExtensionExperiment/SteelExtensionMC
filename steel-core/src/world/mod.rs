@@ -301,6 +301,8 @@ pub struct World {
     tick_runs_normally: AtomicBool,
     /// Whether vanilla's scheduled/chunk/block-event tick phase is active.
     handling_tick: AtomicBool,
+    /// Set when removal of this runtime world starts; the world then refuses every entry.
+    retiring: AtomicBool,
     /// Ordered, duplicate-suppressing server block events awaiting execution.
     block_events: SyncMutex<BlockEventQueue>,
     /// Vanilla collecting neighbor updater shared by all live block mutations.
@@ -339,6 +341,25 @@ pub struct World {
 }
 
 impl World {
+    /// Whether removal of this runtime world has started. Retiring worlds refuse new entries.
+    #[must_use]
+    pub fn is_retiring(&self) -> bool {
+        self.retiring.load(Ordering::Acquire)
+    }
+
+    /// Marks the world as being removed; irreversible.
+    pub(crate) fn begin_retiring(&self) {
+        self.retiring.store(true, Ordering::Release);
+    }
+
+    /// Stops the chunk tasks of a runtime world and waits for them. The RAM contents are
+    /// discarded; serializing chunks would only retain them longer.
+    pub(crate) async fn retire_runtime(self: Arc<Self>) {
+        self.chunk_map.stop_generation_refill_loop();
+        self.chunk_map.task_tracker.close();
+        self.chunk_map.task_tracker.wait().await;
+    }
+
     /// Gameplay event subscriptions, absent for worlds created without server extensions.
     #[must_use]
     pub fn events(&self) -> Option<&Events> {
@@ -485,6 +506,7 @@ impl World {
                 default_gamemode: AtomicI8::new(default_gamemode.into()),
                 tick_runs_normally: AtomicBool::new(true),
                 handling_tick: AtomicBool::new(false),
+                retiring: AtomicBool::new(false),
                 block_events: SyncMutex::new(BlockEventQueue::default()),
                 neighbor_updater: CollectingNeighborUpdater::new(max_chained_neighbor_updates),
                 entity_manager: WorldEntityManager::new(),
