@@ -25,8 +25,8 @@ fn mob_death_loot_continues_across_worlds_and_explicit_seeds_bypass_the_sequence
     let _domains = runtime
         .block_on(DomainRandomSequences::load(&worlds))
         .expect("streams");
-    let primary = worlds.default_world("death_sequences").expect("primary");
-    let nether = worlds
+    let primary = &worlds.default_world("death_sequences").expect("primary");
+    let nether = &worlds
         .get(&Identifier::new_static("death_sequences", "nether"))
         .expect("nether");
     let expected = RandomSequences::new_for_test(primary.level_data.read().seed());
