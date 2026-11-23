@@ -148,7 +148,7 @@ impl fmt::Debug for WorldTemplate {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::{
         env, fs, process,
@@ -156,7 +156,7 @@ mod tests {
     };
     use steel_registry::{init_vanilla_registry, vanilla_dimension_types::OVERWORLD};
 
-    fn temp_world_dir(name: &str) -> PathBuf {
+    pub(crate) fn temp_world_dir(name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after unix epoch")
@@ -167,7 +167,7 @@ mod tests {
         path
     }
 
-    fn flat_settings(min_y: i32, height: i32) -> WorldGenerationSettings {
+    pub(crate) fn flat_settings(min_y: i32, height: i32) -> WorldGenerationSettings {
         let mut config = toml::map::Map::new();
         config.insert(
             "dimension_type".to_owned(),
@@ -182,7 +182,7 @@ mod tests {
         )
     }
 
-    fn write_level(dir: &Path, generation: Option<WorldGenerationSettings>) {
+    pub(crate) fn write_level(dir: &Path, generation: Option<WorldGenerationSettings>) {
         let mut data = LevelData::new_with_seed(77);
         data.generation = generation;
         data.save_game_rules();

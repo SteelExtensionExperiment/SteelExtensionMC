@@ -12,6 +12,7 @@ pub mod registry_cache;
 pub mod resources;
 mod run_loop;
 mod service_keys;
+pub mod templates;
 pub mod temporary;
 mod tick_overload;
 /// The tick rate manager for the server.
@@ -308,6 +309,7 @@ pub async fn test_server_with_worlds_and_config(
     Ok(Arc::new(Server {
         temporary_worlds: temporary::TemporaryWorlds::default(),
         world_operations: world_operations::WorldOperations::default(),
+        world_templates: templates::WorldTemplates::default(),
         world_generators,
         extensions,
         damage_history,
@@ -532,6 +534,7 @@ use jobs::teleport::{
 pub struct Server {
     temporary_worlds: temporary::TemporaryWorlds,
     world_operations: world_operations::WorldOperations,
+    world_templates: templates::WorldTemplates,
     world_generators: WorldGeneratorRegistry,
     extensions: Arc<Extensions>,
     pub(crate) damage_history: Arc<DamageHistory>,
@@ -980,6 +983,7 @@ impl Server {
         Ok(Server {
             temporary_worlds: temporary::TemporaryWorlds::default(),
             world_operations: world_operations::WorldOperations::default(),
+            world_templates: templates::WorldTemplates::default(),
             world_generators: generator_registry,
             extensions,
             damage_history,
