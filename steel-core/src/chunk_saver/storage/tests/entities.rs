@@ -690,3 +690,26 @@ fn unimplemented_block_entities_preserve_nbt_through_proto_save_load() {
     assert_eq!(saved.long("LootTableSeed"), Some(42));
     assert_eq!(loaded_entity.collect_components().get(REPAIR_COST), Some(3));
 }
+
+#[test]
+fn hologram_text_display_is_not_saved_but_summoned_one_is() {
+    init_globals();
+
+    let position = DVec3::new(5.5, 6.0, 7.5);
+    let hologram: SharedEntity = Arc::new(TextDisplayEntity::new_hologram(
+        next_entity_id(),
+        position,
+        Weak::new(),
+    ));
+    let summoned: SharedEntity = Arc::new(TextDisplayEntity::new(
+        &vanilla_entities::TEXT_DISPLAY,
+        next_entity_id(),
+        position,
+        Weak::new(),
+    ));
+
+    let saved = ChunkStorage::entities_to_persistent(&[hologram, Arc::clone(&summoned)]);
+
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].uuid, *summoned.uuid().as_bytes());
+}

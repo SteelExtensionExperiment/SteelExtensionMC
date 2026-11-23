@@ -128,6 +128,7 @@ mod events;
 pub mod explosion;
 /// Vanilla game-event contexts, listeners, and dispatch storage.
 pub mod game_event;
+mod hologram;
 mod level_effects;
 mod level_reader;
 mod player_index;
@@ -167,6 +168,7 @@ pub use explosion::{
     SimpleExplosionDamageCalculator,
 };
 pub(crate) use explosion::{ExplosionBlockReader, ImmutableExplosionBlockCalculator};
+pub use hologram::{HologramError, HologramId};
 pub use level_reader::{LevelAccessor, LevelReader, ScheduledTickAccess};
 pub use player_index::{PlayerAreaMap, PlayerMap};
 pub use raycast::{ClipBlockShape, ClipFluid, ClipHitResult, RaytraceAction};
@@ -310,6 +312,8 @@ pub struct World {
     /// World-global ordered block-entity ticker phase.
     block_entity_tickers: block_entity_ticker::WorldBlockEntityTickers,
     pub(crate) block_seats: BlockSeats,
+    /// Text holograms of this world; their entities follow chunk loading.
+    holograms: hologram::HologramRegistry,
     /// Physical entries retained by this world's chunk-owned game-event registries.
     game_event_listener_count: Arc<GameEventListenerCount>,
     /// Entity tracker for managing which players can see which entities.
@@ -487,6 +491,7 @@ impl World {
                 domain_entity_directory: SyncRwLock::new(None),
                 block_entity_tickers: block_entity_ticker::WorldBlockEntityTickers::new(),
                 block_seats: BlockSeats::default(),
+                holograms: hologram::HologramRegistry::default(),
                 game_event_listener_count: GameEventListenerCount::shared(),
                 entity_tracker: EntityTracker::new(),
                 navigating_mobs: NavigatingMobTracker::new(),
