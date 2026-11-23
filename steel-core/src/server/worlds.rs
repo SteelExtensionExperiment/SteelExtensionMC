@@ -1,7 +1,7 @@
 //! Domain-aware loaded worlds. Readers own snapshots so worlds may retire at tick boundaries.
 use crate::config::{ResolvedDomainConfig, ResolvedWorldConfig};
 use crate::world::{DomainEntityDirectory, World};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use small_map::FxSmallMap;
 use std::sync::Arc;
 use steel_utils::{Identifier, locks::SyncRwLock};
@@ -15,9 +15,24 @@ pub struct WorldMap {
     default_domain: String,
     state: SyncRwLock<WorldMapState>,
 }
+/// Where a runtime world joins the map.
+pub(crate) enum RuntimePlacement {
+    /// First world of a new temporary domain; it becomes the domain's default world.
+    NewDomainDefault,
+    /// Additional world of a loaded domain.
+    Member,
+}
+/// A loaded domain. The default world is `None` once a temporary domain's first world is removed.
+struct DomainEntry {
+    default_world: Option<Identifier>,
+}
 struct WorldMapState {
     worlds: FxSmallMap<8, Identifier, Arc<World>>,
-    default_worlds: FxHashMap<String, Identifier>,
+    domains: FxHashMap<String, DomainEntry>,
+    /// Worlds created at runtime, the only ones that can be removed.
+    runtime_worlds: FxHashSet<Identifier>,
+    /// Worlds whose game-time clock is advanced each tick. Derived worlds share another's clock.
+    clock_owners: Vec<Identifier>,
     nether_portal_targets: FxHashMap<Identifier, Identifier>,
     end_portal_targets: FxHashMap<Identifier, Identifier>,
     entity_directories: FxHashMap<String, Arc<DomainEntityDirectory>>,
@@ -34,10 +49,19 @@ impl WorldMap {
             default_domain,
             state: SyncRwLock::new(WorldMapState {
                 worlds: FxSmallMap::default(),
-                default_worlds: domains
+                domains: domains
                     .iter()
-                    .map(|d| (d.name.clone(), d.default_world.clone()))
+                    .map(|d| {
+                        (
+                            d.name.clone(),
+                            DomainEntry {
+                                default_world: Some(d.default_world.clone()),
+                            },
+                        )
+                    })
                     .collect(),
+                runtime_worlds: FxHashSet::default(),
+                clock_owners: domains.iter().map(|d| d.default_world.clone()).collect(),
                 nether_portal_targets: configs
                     .iter()
                     .filter_map(|w| {
@@ -90,11 +114,11 @@ impl WorldMap {
     /// Panics if a validated domain primary is missing.
     pub fn advance_domain_game_times(&self) {
         let state = self.state.read();
-        for key in state.default_worlds.values() {
-            let Some(primary) = state.worlds.get(key) else {
-                panic!("validated domain primary is missing: {key}");
+        for key in &state.clock_owners {
+            let Some(owner) = state.worlds.get(key) else {
+                panic!("validated clock owner is missing: {key}");
             };
-            primary.level_data.write().advance_game_time();
+            owner.level_data.write().advance_game_time();
         }
     }
     /// Inserts a loaded world during initial construction.
@@ -115,35 +139,59 @@ impl WorldMap {
         directory.add_world(&world);
         world.set_domain_entity_directory(Arc::clone(directory));
     }
-    pub(crate) fn publish_temporary_world(
+    /// Publishes a runtime world at a tick boundary.
+    ///
+    /// A member that owns its clock is advanced on its own; a derived member must share its
+    /// domain default world's clock.
+    pub(crate) fn publish_runtime_world(
         &self,
         world: Arc<World>,
-        primary: bool,
+        placement: RuntimePlacement,
     ) -> Result<(), String> {
         let mut state = self.state.write();
         if state.worlds.get(&world.key).is_some() {
             return Err(format!("world {} already exists", world.key));
         }
-        if primary {
-            if state.default_worlds.contains_key(world.domain()) {
-                return Err(format!("domain {} already exists", world.domain()));
+        let owns_clock = world.level_data.read().owns_game_time();
+        match placement {
+            RuntimePlacement::NewDomainDefault => {
+                if state.domains.contains_key(world.domain()) {
+                    return Err(format!("domain {} already exists", world.domain()));
+                }
+                if !owns_clock {
+                    return Err("temporary primary must own its clock".into());
+                }
+                state.domains.insert(
+                    world.domain().to_owned(),
+                    DomainEntry {
+                        default_world: Some(world.key.clone()),
+                    },
+                );
             }
-            if !world.level_data.read().owns_game_time() {
-                return Err("temporary primary must own its clock".into());
+            RuntimePlacement::Member if !owns_clock => {
+                let entry = state
+                    .domains
+                    .get(world.domain())
+                    .ok_or("domain no longer exists")?;
+                let key = entry
+                    .default_world
+                    .as_ref()
+                    .ok_or("domain has no default world to share a clock with")?;
+                let parent = state.worlds.get(key).ok_or("domain primary is missing")?;
+                if !Arc::ptr_eq(&parent.game_time, &world.game_time) {
+                    return Err("temporary world must share its domain clock".into());
+                }
             }
-            state
-                .default_worlds
-                .insert(world.domain().to_owned(), world.key.clone());
-        } else {
-            let key = state
-                .default_worlds
-                .get(world.domain())
-                .ok_or("domain no longer exists")?;
-            let parent = state.worlds.get(key).ok_or("domain primary is missing")?;
-            if !Arc::ptr_eq(&parent.game_time, &world.game_time) {
-                return Err("temporary world must share its domain clock".into());
+            RuntimePlacement::Member => {
+                if !state.domains.contains_key(world.domain()) {
+                    return Err("domain no longer exists".into());
+                }
             }
         }
+        if owns_clock {
+            state.clock_owners.push(world.key.clone());
+        }
+        state.runtime_worlds.insert(world.key.clone());
         Self::insert_into(&mut state, world.key.clone(), world);
         Ok(())
     }
@@ -165,8 +213,10 @@ impl WorldMap {
             }
             state.nether_portal_targets.remove(&key);
             state.end_portal_targets.remove(&key);
+            state.runtime_worlds.remove(&key);
+            state.clock_owners.retain(|owner| *owner != key);
         }
-        state.default_worlds.remove(domain);
+        state.domains.remove(domain);
         state.entity_directories.remove(domain);
         removed
     }
@@ -223,13 +273,13 @@ impl WorldMap {
     /// Whether the domain is published.
     #[must_use]
     pub fn has_domain(&self, domain: &str) -> bool {
-        self.state.read().default_worlds.contains_key(domain)
+        self.state.read().domains.contains_key(domain)
     }
     /// Takes a snapshot of loaded domain names.
     pub fn domain_names(&self) -> impl Iterator<Item = String> {
         self.state
             .read()
-            .default_worlds
+            .domains
             .keys()
             .cloned()
             .collect::<Vec<_>>()
@@ -242,19 +292,20 @@ impl WorldMap {
     pub(crate) fn domain_default_worlds(&self) -> Vec<Arc<World>> {
         let state = self.state.read();
         state
-            .default_worlds
+            .domains
             .values()
-            .filter_map(|key| state.worlds.get(key).map(Arc::clone))
+            .filter_map(|entry| {
+                let key = entry.default_world.as_ref()?;
+                state.worlds.get(key).map(Arc::clone)
+            })
             .collect()
     }
     /// Returns a domain's primary world.
     #[must_use]
     pub fn default_world(&self, domain: &str) -> Option<Arc<World>> {
         let state = self.state.read();
-        state
-            .worlds
-            .get(state.default_worlds.get(domain)?)
-            .map(Arc::clone)
+        let key = state.domains.get(domain)?.default_world.as_ref()?;
+        state.worlds.get(key).map(Arc::clone)
     }
     /// Returns the server's permanent default world.
     #[must_use]
@@ -324,11 +375,100 @@ fn end_entry_portal_target_world_name(source: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{end_entry_portal_target_world_name, nether_portal_target_world_name};
+    use super::{WorldMap, end_entry_portal_target_world_name, nether_portal_target_world_name};
+
+    fn runtime_map(domain: &'static str) -> (WorldMap, crate::test_support::TestWorld) {
+        use crate::config::ResolvedDomainConfig;
+        use crate::test_support::fresh_test_world_in_domain;
+        use steel_utils::Identifier;
+
+        let default = fresh_test_world_in_domain(domain, "overworld");
+        let config = ResolvedDomainConfig {
+            name: domain.to_owned(),
+            default_world: default.world.key.clone(),
+            worlds: vec![default.world.key.clone()],
+        };
+        let mut worlds = WorldMap::new(domain.to_owned(), &[config], &[]);
+        worlds.insert(
+            Identifier::new_static(domain, "overworld"),
+            default.world.clone(),
+        );
+        (worlds, default)
+    }
+
+    #[test]
+    fn runtime_member_with_its_own_clock_advances_independently() {
+        use super::RuntimePlacement;
+        use crate::test_support::fresh_test_world_in_domain;
+
+        let (worlds, default) = runtime_map("own_clock");
+        let member = fresh_test_world_in_domain("own_clock", "clone");
+        worlds
+            .publish_runtime_world(member.world.clone(), RuntimePlacement::Member)
+            .expect("a member may own its clock");
+        let member_before = member.world.game_time.ticks();
+        let default_before = default.world.game_time.ticks();
+
+        worlds.advance_domain_game_times();
+        worlds.advance_domain_game_times();
+
+        assert_eq!(member.world.game_time.ticks(), member_before + 2);
+        assert_eq!(default.world.game_time.ticks(), default_before + 2);
+        assert!(!std::sync::Arc::ptr_eq(
+            &member.world.game_time,
+            &default.world.game_time
+        ));
+    }
+
+    #[test]
+    fn domain_without_a_default_world_stays_registered() {
+        use super::RuntimePlacement;
+        use crate::test_support::fresh_test_world_in_domain;
+
+        let (worlds, _default) = runtime_map("no_default");
+        let member = fresh_test_world_in_domain("no_default", "clone");
+        worlds
+            .publish_runtime_world(member.world.clone(), RuntimePlacement::Member)
+            .expect("member publishes");
+        worlds
+            .state
+            .write()
+            .domains
+            .get_mut("no_default")
+            .expect("domain")
+            .default_world = None;
+
+        worlds.advance_domain_game_times();
+
+        assert!(worlds.has_domain("no_default"));
+        assert!(worlds.default_world("no_default").is_none());
+        assert!(worlds.domain_default_worlds().is_empty());
+        assert_eq!(worlds.worlds_in_domain("no_default").len(), 2);
+    }
+
+    #[test]
+    fn derived_members_must_share_the_domain_clock() {
+        use super::RuntimePlacement;
+        use crate::test_support::{fresh_test_derived_world, fresh_test_world_in_domain};
+
+        let (worlds, default) = runtime_map("derived_clock");
+        let sibling = fresh_test_derived_world(&default.world, "sibling");
+        worlds
+            .publish_runtime_world(sibling.world.clone(), RuntimePlacement::Member)
+            .expect("a derived sibling shares the default clock");
+
+        let other_primary = fresh_test_world_in_domain("derived_clock", "other_primary");
+        let stranger = fresh_test_derived_world(&other_primary.world, "stranger");
+        assert!(
+            worlds
+                .publish_runtime_world(stranger.world.clone(), RuntimePlacement::Member)
+                .is_err(),
+            "a derived world of another clock is refused"
+        );
+    }
 
     #[test]
     fn domain_saved_data_targets_only_default_worlds() {
-        use super::WorldMap;
         use crate::config::ResolvedDomainConfig;
         use crate::test_support::fresh_test_world_in_domain;
         use steel_utils::Identifier;

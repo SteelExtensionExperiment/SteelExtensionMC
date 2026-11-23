@@ -4,6 +4,7 @@ use super::{
     PlayerAdmissionState, Server,
     jobs::{JobPoll, ServerJob, ServerJobContext},
     world_operations::WorldOperationId,
+    worlds::RuntimePlacement,
 };
 use crate::{
     chunk::chunk_request::ChunkRequestHandle, level_data::GameTimeSource,
@@ -216,9 +217,14 @@ impl ServerJob for CreateWorldJob {
                 server.command_storage.insert_temporary(&self.domain);
             }
             let key = world.key.clone();
+            let placement = if self.primary {
+                RuntimePlacement::NewDomainDefault
+            } else {
+                RuntimePlacement::Member
+            };
             server
                 .worlds
-                .publish_temporary_world(Arc::clone(world), self.primary)?;
+                .publish_runtime_world(Arc::clone(world), placement)?;
             server.fire_world_load(world);
             if let Some(ticket) = prepared.spawn_ticket.take()
                 && let Some(domain) = server
