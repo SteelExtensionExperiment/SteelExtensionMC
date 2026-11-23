@@ -10,6 +10,7 @@ pub(crate) mod events;
 pub(crate) mod fill;
 pub(crate) mod fluid;
 mod generator;
+pub(crate) mod holograms;
 pub(crate) mod hud;
 pub(crate) mod inventory_snapshot;
 pub(crate) mod items;

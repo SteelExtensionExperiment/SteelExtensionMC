@@ -2,6 +2,8 @@
 use crate::BlockPos;
 use stabby::{option::Option as StableOption, string::String as ApiString};
 #[cfg(feature = "host")]
+use steel_core::entity::entities::BillboardConstraints;
+#[cfg(feature = "host")]
 use steel_utils::types::{Difficulty as CoreDifficulty, GameType as CoreGameMode};
 /// Host-resolved player identity. A lookup always checks current session ownership.
 #[stabby::stabby]
@@ -42,6 +44,26 @@ pub struct PlayerInfo {
 #[derive(Debug, Clone, Copy)]
 pub struct Operation {
     pub(crate) id: u64,
+}
+/// Opaque handle of a text hologram, valid until it is removed or its world unloads.
+#[stabby::stabby]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HologramId {
+    pub(crate) id: u64,
+}
+/// How a hologram text turns towards the viewer, matching the vanilla billboard constraints.
+#[stabby::stabby]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Billboard {
+    /// Both axes fixed; the text keeps its orientation.
+    Fixed,
+    /// Only the vertical axis is fixed; the text turns around it.
+    Vertical,
+    /// Only the horizontal axis is fixed; the text tilts up and down.
+    Horizontal,
+    /// Neither axis is fixed; the text always faces the viewer.
+    Center,
 }
 /// State of a world operation.
 #[stabby::stabby]
@@ -112,6 +134,17 @@ impl GameMode {
             Self::Creative => CoreGameMode::Creative,
             Self::Adventure => CoreGameMode::Adventure,
             Self::Spectator => CoreGameMode::Spectator,
+        }
+    }
+}
+#[cfg(feature = "host")]
+impl Billboard {
+    pub(crate) const fn into_host(self) -> BillboardConstraints {
+        match self {
+            Self::Fixed => BillboardConstraints::Fixed,
+            Self::Vertical => BillboardConstraints::Vertical,
+            Self::Horizontal => BillboardConstraints::Horizontal,
+            Self::Center => BillboardConstraints::Center,
         }
     }
 }

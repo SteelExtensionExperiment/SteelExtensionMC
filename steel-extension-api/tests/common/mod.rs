@@ -217,12 +217,13 @@ pub async fn until(
     ))
 }
 
-/// Debug build of the extension crate `name` (`event_probe` lives in `tests/event-probe`, the
-/// others in `extension-example/<crate>`); build them first, see the crate README.
+/// Debug build of the extension crate `name` (`event_probe` and `hologram_probe` live in
+/// `tests/<crate>`, the others in `extension-example/<crate>`); build them first, see the
+/// crate README.
 pub fn library(name: &str) -> PathBuf {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let crate_dir = if name == "event_probe" {
-        root.join("tests/event-probe")
+    let crate_dir = if matches!(name, "event_probe" | "hologram_probe") {
+        root.join("tests").join(name.replace('_', "-"))
     } else {
         root.join("../extension-example")
             .join(name.replace('_', "-"))

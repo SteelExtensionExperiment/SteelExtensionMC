@@ -614,11 +614,12 @@ cargo test -p steel-extension-api --features host --lib
 cargo test -p steel-extension-api --doc
 cargo build --manifest-path steel-extension-api/tests/fixture/Cargo.toml
 cargo build --manifest-path steel-extension-api/tests/event-probe/Cargo.toml
+cargo build --manifest-path steel-extension-api/tests/hologram-probe/Cargo.toml
 cargo build --manifest-path extension-example/wool-shearing/Cargo.toml
 cargo build --manifest-path extension-example/game-of-life/Cargo.toml
 cargo build --manifest-path extension-example/strange-terrain/Cargo.toml
 cargo test -p steel-extension-api --features host --test behavior --test native --test game_of_life --test strange_terrain --test registration_failure --test package -- --include-ignored
-cargo test -p steel-extension-api --features host --test ports --test events --test folder --test prison -- --include-ignored
+cargo test -p steel-extension-api --features host --test ports --test events --test folder --test prison --test holograms -- --include-ignored
 cargo build --manifest-path stabby/tests/host-api/Cargo.toml -p host-api-fixture-plugin
 cargo run --manifest-path stabby/tests/host-api/Cargo.toml -p host-api-fixture-host -- stabby/tests/host-api/target/debug/libhost_api_fixture_plugin.so
 ```

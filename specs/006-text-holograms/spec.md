@@ -16,17 +16,16 @@ This spec is the **host platform** half. The extension that needs it is specifie
 
 ## Decisions
 
-Proposals from the stats-visualizer planning round. **Every row marked (confirm) needs the user's answer
-before implementation.** Nothing is built from this spec until then.
+Proposals from the stats-visualizer planning round. H3, H5 confirmed and H6 dropped by the user on 2026-11-23.
 
 | # | Decision |
 | --- | --- |
 | H1 | A **hologram** is a vanilla text display entity owned by the host and controlled by an extension through an opaque handle. The extension never sees entity ids or UUIDs. |
 | H2 | Holograms are **never written to chunk data**. An extension recreates its own holograms at startup. A server restart never leaves a duplicate or a stray one. |
-| H3 | The host **keeps a hologram alive across chunk unload and load**: it removes the entity with its chunk and recreates it when the chunk loads again. The extension does nothing for this. (confirm) |
+| H3 | The host **keeps a hologram alive across chunk unload and load**: it removes the entity with its chunk and recreates it when the chunk loads again. The extension does nothing for this. **Confirmed**: the entity is non-persistent, dropped with its chunk (like `BlockSeat`) and recreated from the record on chunk load (research R4). |
 | H4 | A hologram whose world is **unloaded or removed** is dropped; its handle becomes invalid and operations on it fail with a message. The extension recreates it on the next `on_world_load`. |
-| H5 | The extension sets **text** (plain or JSON component, as every text API) and a **billboard mode**; a floating board uses "face the viewer". All other display properties use vanilla defaults. (confirm) |
-| H6 | Handles belong to the **extension that created them**; one extension cannot change another's. (confirm) |
+| H5 | The extension sets **text** (plain or JSON component, as every text API) and a **billboard mode**; a floating board uses "face the viewer". All other display properties use vanilla defaults. **Confirmed.** |
+| H6 | **Dropped** (user, 2026-11-23): `Server<'_>` carries no caller identity and `Operation` handles are unowned. A handle is an opaque `u64`, never reused in a process; any extension holding it may use it. |
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -47,7 +46,7 @@ receives a text display entity with that text and the face-the-viewer mode.
 
 1. **Given** a loaded world and chunk, **When** a hologram is created, **Then** a handle is returned and nearby players see the text.
 2. **Given** a world key that is not loaded, **When** a hologram is created, **Then** the call fails with a message naming the world.
-3. **Given** text that is not valid plain text or a JSON component, **When** a hologram is created, **Then** the call fails and no entity exists.
+3. **Given** text that starts like a JSON component but is malformed, **When** a hologram is created, **Then** it is shown as plain text, as in every other extension text API (FR-007); `parse_text` never fails.
 4. **Given** a position outside the dimension's build height, **When** a hologram is created, **Then** the call fails.
 
 ---
@@ -107,7 +106,7 @@ The extension removes a hologram, or its world goes away. No entity is left behi
 - A player disconnects and reconnects: the normal entity tracker re-sends the hologram.
 - A hologram in a world cloned from a template (spec 005): created like any other world; dropped when the
   runtime world is removed (H4).
-- Two extensions use holograms: each only touches its own handles (H6).
+- Two extensions use holograms: handles are opaque and never reused, so they do not collide.
 
 ## Requirements *(mandatory)*
 
@@ -118,7 +117,6 @@ The extension removes a hologram, or its world goes away. No entity is left behi
 - **FR-003**: A hologram MUST NOT be written to chunk, entity or player data.
 - **FR-004**: The host MUST recreate a hologram when its chunk loads and remove its entity when its chunk unloads, preserving the current text, with exactly one entity per hologram at any time.
 - **FR-005**: The host MUST drop a hologram when its world is unloaded or removed and MUST fail later calls on its handle with a clear message.
-- **FR-006**: A handle MUST be accepted only from the extension that created it.
 - **FR-007**: Text MUST be accepted in the forms every other extension text API accepts (`steel-extension-api/src/text.rs`).
 - **FR-008**: Existing behavior of `World::spawn_entity` and of vanilla `/summon text_display` MUST NOT change.
 - **FR-009**: The change MUST have host tests beside the code and a native test with a probe extension.
@@ -138,11 +136,9 @@ See [data-model.md](data-model.md): `Hologram`, `HologramId`, `HologramRegistry`
 ## Assumptions
 
 - **A1**: vanilla `Display.TextDisplay` behavior and text component rules are mirrored by the existing
-  `TextDisplayEntity` (`steel-core/src/entity/entities/objects/technical/display/text_display.rs`). This is
-  **not yet verified against vanilla source**: `minecraft-src/` is absent in this checkout (see
-  [research.md](research.md) R1). Verifying it is the first task.
+  `TextDisplayEntity` (`steel-core/src/entity/entities/objects/technical/display/text_display.rs`).
+  **Verified** against vanilla 26.3 source and extracted data on 2026-11-23 (research R1).
 - **A2**: the entity tracker already sends display entity data to clients; no new packet is needed.
 - **A3**: out of scope: item and block displays, transformation animations, interaction (click) handling,
   per-player visibility, holograms that follow an entity, and any persistence of holograms.
-- **O1 (open)**: H3 and H5 and H6 (confirm). Also whether text may exceed the vanilla line width limits
-  and how the host reports that.
+- **O1 (closed)**: vanilla has no server-side text length or line limit (research R1).

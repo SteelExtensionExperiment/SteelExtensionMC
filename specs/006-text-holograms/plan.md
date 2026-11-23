@@ -30,8 +30,8 @@ runtime bindings.
 | Principle | Status | How |
 | --- | --- | --- |
 | I. Stable Native Boundary | Pass | New types are stabby with a plain `u64` handle; no host pointers cross. |
-| II. Modding-Grade Extensibility | Pass | Handle ownership per extension (H6); no vanilla-specific key leaks. |
-| III. Vanilla Parity First | **Blocked** | A1 unverified: `minecraft-src/` missing (research R1). |
+| II. Modding-Grade Extensibility | Pass | Opaque non-reused handle; no vanilla-specific key leaks. |
+| III. Vanilla Parity First | Pass | A1 verified against vanilla 26.3 (research R1). |
 | IV. Foundation Rigor | Pass | Whole lifecycle (create, update, unload, load, drop) is in scope; no stubs. |
 | V. Explicit Failure | Pass | Every failure is a message. |
 | VI. Concurrency & Dependencies | Pass | One mutex, no threads, no new crates. |
