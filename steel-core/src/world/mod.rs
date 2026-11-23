@@ -403,6 +403,9 @@ impl World {
             WorldStorageConfig::RamOnly => {
                 Arc::new(ChunkStorage::RamOnly(RamOnlyStorage::empty_world()))
             }
+            WorldStorageConfig::RamClone { template } => Arc::new(ChunkStorage::RamOnly(
+                RamOnlyStorage::from_template(Arc::clone(template)),
+            )),
         };
 
         // Create or skip level data based on config

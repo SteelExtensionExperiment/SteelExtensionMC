@@ -481,7 +481,7 @@ impl ChunkStorage {
     ) -> io::Result<Option<LoadedChunk>> {
         match self {
             Self::Disk(rm) => rm.load_chunk(pos, min_y, height, level, thread_pool).await,
-            Self::RamOnly(ram) => ram.load_chunk(pos, min_y, height, level).await,
+            Self::RamOnly(ram) => ram.load_chunk(pos, min_y, height, level, thread_pool).await,
         }
     }
 

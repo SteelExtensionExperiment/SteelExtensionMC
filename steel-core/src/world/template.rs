@@ -118,6 +118,24 @@ impl WorldTemplate {
         Ok(())
     }
 
+    /// Builds a template from already-encoded chunks, for storage tests.
+    #[cfg(test)]
+    pub(crate) fn from_chunks(
+        key: Identifier,
+        generation: WorldGenerationSettings,
+        chunks: FxHashMap<ChunkPos, TemplateChunk>,
+    ) -> Self {
+        Self {
+            key,
+            source: PathBuf::new(),
+            generation,
+            seed: 0,
+            spawn: SpawnPoint::default(),
+            difficulty: Difficulty::default(),
+            chunks,
+        }
+    }
+
     /// The saved chunk at `pos`, if any.
     #[must_use]
     pub fn chunk(&self, pos: ChunkPos) -> Option<&TemplateChunk> {
