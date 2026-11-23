@@ -28,6 +28,8 @@
 //! Block data uses power-of-2 bit packing (1, 2, 4, 8, 16 bits) to avoid entries
 //! spanning u64 boundaries.
 
+use std::io;
+
 use glam::IVec3;
 use steel_utils::{BoundingBox, Identifier, PackedChunkPos};
 use wincode::{SchemaRead, SchemaWrite};
@@ -100,6 +102,9 @@ pub const FIRST_DATA_SECTOR: u32 = 3;
 
 /// Maximum chunk size in bytes (16MB - should be plenty).
 pub const MAX_CHUNK_SIZE: usize = 16 * 1024 * 1024;
+
+/// zstd compression level for chunk payloads.
+pub const CHUNK_COMPRESSION_LEVEL: i32 = 3;
 
 /// Entry in the chunk location table.
 ///
@@ -191,6 +196,46 @@ impl ChunkEntry {
     }
 }
 
+impl ChunkEntry {
+    /// Checks that an existing entry points at data inside a file of `file_sectors` sectors.
+    ///
+    /// # Errors
+    /// Returns `InvalidData` when the entry points into the header, has an invalid size, or
+    /// ends past the file.
+    pub fn validate(self, file_sectors: u32) -> io::Result<()> {
+        if self.sector_offset < FIRST_DATA_SECTOR {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "chunk table entry points into the region header at sector {}",
+                    self.sector_offset
+                ),
+            ));
+        }
+        if self.size_bytes == 0 || self.size_bytes as usize > MAX_CHUNK_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid chunk table entry size {}", self.size_bytes),
+            ));
+        }
+        let Some(end_sector) = self.sector_offset.checked_add(self.sector_count()) else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "chunk table entry sector range overflowed",
+            ));
+        };
+        if end_sector > file_sectors {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "chunk table entry ends at sector {end_sector}, past region end {file_sectors}"
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl Default for ChunkEntry {
     fn default() -> Self {
         Self::empty()
@@ -251,6 +296,33 @@ impl RegionHeader {
             entries[i] = entry;
         }
         Ok(Self { entries })
+    }
+
+    /// Checks every existing entry and that no two entries (or the file header) share a sector.
+    ///
+    /// # Errors
+    /// Returns `InvalidData` for the first invalid or overlapping entry.
+    pub fn validate_entries(&self, file_sectors: u32) -> io::Result<()> {
+        let mut occupied = vec![false; file_sectors as usize];
+        for sector in occupied.iter_mut().take(FIRST_DATA_SECTOR as usize) {
+            *sector = true;
+        }
+        for (index, &entry) in self.entries.iter().enumerate() {
+            if !entry.exists() {
+                continue;
+            }
+            entry.validate(file_sectors)?;
+            let start = entry.sector_offset as usize;
+            let end = start + entry.sector_count() as usize;
+            if occupied[start..end].iter().any(|is_occupied| *is_occupied) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("chunk table entry {index} overlaps another region allocation"),
+                ));
+            }
+            occupied[start..end].fill(true);
+        }
+        Ok(())
     }
 
     /// Finds a contiguous range of free sectors for allocation.
@@ -1219,6 +1291,17 @@ impl RegionPos {
     pub fn filename(self) -> String {
         format!("r.{}.{}.srg", self.x, self.z)
     }
+
+    /// Parses a file name produced by [`Self::filename`]; any other name returns `None`.
+    #[must_use]
+    pub fn from_filename(name: &str) -> Option<Self> {
+        let (x, z) = name
+            .strip_prefix("r.")?
+            .strip_suffix(".srg")?
+            .split_once('.')?;
+        let pos = Self::new(x.parse().ok()?, z.parse().ok()?);
+        (pos.filename() == name).then_some(pos)
+    }
 }
 
 #[cfg(test)]
@@ -1237,6 +1320,27 @@ mod tests {
             wincode::deserialize_exact(&encoded).expect("block state should deserialize");
 
         assert_eq!(decoded, state);
+    }
+
+    #[test]
+    fn region_pos_filename_round_trips_including_negative_coordinates() {
+        for pos in [
+            RegionPos::new(0, 0),
+            RegionPos::new(-3, 7),
+            RegionPos::new(5, -1),
+            RegionPos::new(i32::MIN, i32::MAX),
+        ] {
+            assert_eq!(RegionPos::from_filename(&pos.filename()), Some(pos));
+        }
+        for name in [
+            "r.0.0.srg.v3.bak",
+            "r.1.srg",
+            "r.+1.0.srg",
+            "r.01.0.srg",
+            "x.0.0.srg",
+        ] {
+            assert_eq!(RegionPos::from_filename(name), None, "{name}");
+        }
     }
 
     #[test]
