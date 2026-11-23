@@ -22,7 +22,7 @@ description: "Task list for the extension hologram host platform"
 
 - [x] T001 Generate `minecraft-src/` with `update-minecraft-src.sh` (or obtain it from the user) and verify spec assumption A1 and research R1 against vanilla `Display.TextDisplay`: defaults, billboard values, line-width and text limits, tracking and view range, and what vanilla persists. Record findings in `research.md`; stop and ask for anything that does not match `TextDisplayEntity`.
 - [x] T002 Read `World::on_entity_chunk_unload_start/finalized` (`steel-core/src/world/entity_management.rs:377-400`), the entity manager and `BlockSeat` unload handling, and decide the H3 mechanism (keep entity with chunk, or remove and recreate). Record it in `research.md` R4. Stop and ask if both options are unsuitable.
-- [ ] T003 [P] Add `steel-extension-api/tests/hologram-probe/` (own `[workspace]`, `cdylib`, modeled on `tests/event-probe`) with one command per binding, and the native test entry `tests/holograms.rs`, `#[ignore]` until built. Add its library path next to the `event_probe` special case in `tests/common/mod.rs`.
+- [x] T003 [P] Add `steel-extension-api/tests/hologram-probe/` (own `[workspace]`, `cdylib`, modeled on `tests/event-probe`) with one command per binding, and the native test entry `tests/holograms.rs`, `#[ignore]` until built. Add its library path next to the `event_probe` special case in `tests/common/mod.rs`.
 
 ---
 
@@ -44,8 +44,8 @@ description: "Task list for the extension hologram host platform"
 
 ## Phase 4: User Stories 3 and 4
 
-- [ ] T008 [US3] Complete the native test `tests/holograms.rs` against the probe: create, update, unload and load a chunk, save the world and inspect region data for holograms (SC-001), restart-style recreation yields one entity (SC-002), update sends one metadata update (SC-003).
-- [ ] T009 [US4] Native test for remove and world unload (H4): handles fail afterwards, nothing remains.
+- [x] T008 [US3] Complete the native test `tests/holograms.rs` against the probe: create, update, unload and load a chunk, save the world and inspect region data for holograms (SC-001), restart-style recreation yields one entity (SC-002), update sends one metadata update (SC-003).
+- [x] T009 [US4] Native test for remove and world unload (H4): handles fail afterwards, nothing remains.
 
 ---
 
