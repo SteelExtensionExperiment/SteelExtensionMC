@@ -300,6 +300,11 @@ impl WorldMap {
             })
             .collect()
     }
+    /// Whether the world was created at runtime and can be removed again.
+    #[must_use]
+    pub fn is_runtime_world(&self, key: &Identifier) -> bool {
+        self.state.read().runtime_worlds.contains(key)
+    }
     /// Returns a domain's primary world.
     #[must_use]
     pub fn default_world(&self, domain: &str) -> Option<Arc<World>> {

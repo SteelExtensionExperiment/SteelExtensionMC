@@ -346,3 +346,60 @@ fn clone_joins_a_lasting_domain_and_refuses_missing_or_closing_domains() -> Resu
         Ok(())
     })
 }
+
+#[test]
+fn saved_runtime_world_of_a_lasting_domain_is_not_restored() -> Result<(), String> {
+    init_globals();
+    let fixture = fresh_test_world("clone_saved_home");
+    let home = &fixture.world;
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    runtime.block_on(async {
+        let domain = ResolvedDomainConfig {
+            name: home.domain().to_owned(),
+            default_world: home.key.clone(),
+            worlds: vec![home.key.clone()],
+        };
+        let server = test_server_with_worlds_and_config(
+            domain.name.clone(),
+            from_ref(&domain),
+            from_ref(home),
+            PermissionSubjectIndex::new(),
+            test_runtime_config(16),
+            None,
+        )
+        .await?;
+        let template_key = Identifier::new_static("clone_test", "template");
+        server.register_ready_template(chest_template(
+            template_key.clone(),
+            Identifier::from_steel("empty"),
+        ));
+        let clone_key = Identifier::new(home.domain().to_owned(), "clone".to_owned());
+        let id = server.clone_world(
+            &template_key,
+            clone_key.clone(),
+            DomainTarget::Existing,
+            CloneOverrides {
+                spawn: Some(BlockPos::new(0, 80, 0)),
+                ..CloneOverrides::default()
+            },
+        )?;
+        finish(&server, id).await?;
+
+        assert!(
+            server
+                .resolve_saved_world(&clone_key.to_string(), home.domain(), None, "Steve")
+                .is_none(),
+            "a saved clone key falls back to the domain spawn"
+        );
+        assert!(
+            server
+                .resolve_saved_world(&home.key.to_string(), home.domain(), None, "Steve")
+                .is_some(),
+            "configured worlds are still restored"
+        );
+        Ok(())
+    })
+}
