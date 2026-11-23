@@ -18,6 +18,7 @@ pub mod fill;
 pub mod fluid_behavior;
 pub mod hooks;
 pub mod hud;
+pub mod inventory_snapshot;
 pub mod items;
 pub mod log;
 pub mod menus;
@@ -70,6 +71,7 @@ pub fn bind(bootstrap: Bootstrap) -> Result<(), BindError> {
         .chain(command::api::imports())
         .chain(services::api::imports())
         .chain(items::api::imports())
+        .chain(inventory_snapshot::api::imports())
         .chain(effects::api::imports())
         .chain(hud::api::imports())
         .chain(data::api::imports())

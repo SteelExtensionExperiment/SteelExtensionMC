@@ -11,6 +11,7 @@ pub(crate) mod fill;
 pub(crate) mod fluid;
 mod generator;
 pub(crate) mod hud;
+pub(crate) mod inventory_snapshot;
 pub(crate) mod items;
 mod lifecycle;
 pub(crate) mod menus;
@@ -143,6 +144,7 @@ pub fn bootstrap(mut hook: RegistrationHook<'_>) -> RegistrationStatus {
         crate::command::api::register_exports,
         crate::services::api::register_exports,
         crate::items::api::register_exports,
+        crate::inventory_snapshot::api::register_exports,
         crate::effects::api::register_exports,
         crate::hud::api::register_exports,
         data_api::register_exports,
