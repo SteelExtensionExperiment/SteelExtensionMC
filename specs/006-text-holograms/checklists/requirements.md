@@ -8,7 +8,7 @@
 
 - [x] Focused on user value (extension authors, players)
 - [x] All mandatory sections completed
-- [ ] Decisions H3, H5 and H6 confirmed by the user
+- [x] Decisions H3, H5 confirmed, H6 dropped by the user
 
 ## Requirement Completeness
 
@@ -23,7 +23,7 @@
 
 - [x] Every functional requirement maps to at least one task in tasks.md
 - [x] User scenarios cover create, update, lifecycle, removal
-- [ ] Extension identification for handle ownership read from `steel-extension-api/src/host/` (research R5.3)
+- [x] Extension identification read: none exists; H6 dropped (research R5.3)
 
 ## Notes
 

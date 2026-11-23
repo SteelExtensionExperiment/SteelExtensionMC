@@ -17,6 +17,5 @@ All methods return `ApiResult`, never block, and fail with a message.
   are newlines in the text.
 - A handle is invalid after `remove_hologram` or after its world unloads; operations on it fail with a
   message, except `remove_hologram`, which returns `false`.
-- Only the creating extension may use a handle (H6).
 - An extension that wants its holograms back after a world load recreates them in its own
   `on_world_load` handler; the host does not remember them across world unloads.
