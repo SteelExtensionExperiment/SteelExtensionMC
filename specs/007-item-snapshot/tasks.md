@@ -45,4 +45,4 @@ T001 -> T002, T003 -> T004 -> T005, T006 -> T007 -> T010..T013 (T010, T012, T013
 
 ## Status 2026-11-24
 
-T001-T007, T010, T013 done (commit `8ad86a34`). Open: T011 native probe (optional), T012 timing, T014 hand-off. Known deviations: restore also sends `CSetHeldSlot`; a cancelled game mode change event keeps the old mode and restore still succeeds (user decision pending).
+T001-T007, T010, T013 done (commit `8ad86a34`). Open: T011 native probe (optional), T012 timing, T014 hand-off. Known deviations: restore also sends `CSetHeldSlot`; a cancelled game mode change event fails the restore (approved 2026-11-24).

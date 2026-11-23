@@ -27,7 +27,7 @@ Only ABI-stable fields (`u32`, `stabby::vec::Vec<u8>`). Changing `data`'s meanin
 | Method | Result | Behavior |
 | --- | --- | --- |
 | `inventory_snapshot(player: PlayerId)` | `ApiResult<InventorySnapshot>` | Reads slots 0-40, selected hotbar slot, game mode. Fails naming the slot if a stack cannot be encoded strictly (D4). Does not modify the player. |
-| `restore_inventory(player: PlayerId, snapshot: &InventorySnapshot)` | `ApiResult<()>` | Decodes and validates everything first, then sets slots 0-40 (absent slots empty), the selected slot and the game mode (as `set_game_mode`), then resyncs the client. On error the player is unchanged. |
+| `restore_inventory(player: PlayerId, snapshot: &InventorySnapshot)` | `ApiResult<()>` | Decodes and validates everything first, then applies the game mode (`Player::set_game_mode`; an unchanged mode is fine, a change cancelled by an event is an error), then sets slots 0-40 (absent slots empty) and the selected slot, then resyncs the client and sends the held slot. On error the player is unchanged. |
 
 Both return `Err` for an unknown or offline player and never block. Neither calls extension code while holding a host lock.
 
@@ -58,3 +58,4 @@ Binary NBT, one root compound in the nameless-root (network) form, written with 
 | Unknown item id, invalid components, count outside 1-99 | slot |
 | `Slot` outside 0-40, duplicate `Slot` | slot |
 | `SelectedItemSlot` outside 0-8, unknown `playerGameType` | the value |
+| Game mode change cancelled by an event | the requested mode |

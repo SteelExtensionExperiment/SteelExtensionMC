@@ -165,6 +165,10 @@ pub(crate) fn restore_inventory(
 ) -> Result<(), String> {
     let restored = decode(snapshot)?;
     let player = find(server, id)?;
+    // The game mode goes first: a cancelled change fails the restore before any slot is touched.
+    apply_game_mode(player.game_mode(), restored.game_mode, |mode| {
+        player.set_game_mode(mode)
+    })?;
     {
         let mut inventory = player.inventory.lock();
         for (slot, stack) in restored.slots.into_iter().enumerate() {
@@ -172,13 +176,26 @@ pub(crate) fn restore_inventory(
         }
         inventory.set_selected_slot(restored.selected_slot);
     }
-    // A cancelled game mode change event keeps the old mode, as for `set_game_mode` elsewhere.
-    player.set_game_mode(restored.game_mode);
+    // `broadcast_inventory_changes` syncs menu slots only, not the selected hotbar slot.
     player.send_packet(CSetHeldSlot {
         slot: i32::from(restored.selected_slot),
     });
     player.broadcast_inventory_changes();
     Ok(())
+}
+
+/// Runs `set` when the mode differs. `set` returns false when a game mode change event cancelled it.
+fn apply_game_mode(
+    current: GameType,
+    requested: GameType,
+    set: impl FnOnce(GameType) -> bool,
+) -> Result<(), String> {
+    if current == requested || set(requested) {
+        return Ok(());
+    }
+    Err(format!(
+        "game mode change to {requested:?} was cancelled; inventory not restored"
+    ))
 }
 
 #[cfg(test)]
@@ -509,5 +526,17 @@ mod tests {
         let unknown_mode = i32::from(GameType::Spectator) + 1;
         let message = err(decode(&blob(Vec::new(), 0, unknown_mode)));
         assert!(message.contains(&unknown_mode.to_string()), "{message}");
+    }
+
+    #[test]
+    fn cancelled_game_mode_change_is_an_error_and_same_mode_is_not() {
+        assert!(apply_game_mode(GameType::Survival, GameType::Creative, |_| true).is_ok());
+        assert!(apply_game_mode(GameType::Survival, GameType::Survival, |_| false).is_ok());
+        let message = err(apply_game_mode(
+            GameType::Survival,
+            GameType::Creative,
+            |_| false,
+        ));
+        assert!(message.contains("cancelled"));
     }
 }

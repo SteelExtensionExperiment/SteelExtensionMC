@@ -16,7 +16,8 @@
 //! unchanged. Inventory slots 41-42, experience and the ender chest are not part of a snapshot.
 //!
 //! The bytes in [`InventorySnapshot::data`] are opaque; persist them as they are. The restored
-//! game mode goes through `set_game_mode`, so a cancelled game mode change event keeps the old mode.
+//! game mode goes through `set_game_mode` and is applied first; a game mode change event that
+//! cancels it makes the restore fail with the player unchanged.
 
 use stabby::vec::Vec as ApiVec;
 

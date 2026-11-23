@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-23
 
-**Status**: Draft, **awaiting user approval** (nothing is implemented)
+**Status**: Approved 2026-11-24 (implemented; see tasks.md)
 
 **Input**: Game orchestrator spec O1 and research R1 (`extension-example/game-orchestrator/specs/001-game-orchestrator/`): the extension API's `ItemSpec` drops every component it does not model, so a kit built from an administrator's inventory would not equal what `/invsee` shows. Needed: a host capability that reads and writes a player's full inventory (slots 0-40, game mode) as a lossless, ABI-stable value, including potions, enchanted books, custom model data, attribute modifiers, banners and fireworks. Downstream: `arena-manager-api` adds `PlayerEntry.kit`, the orchestrator saves and loads kits.
 
@@ -19,7 +19,7 @@ Vanilla target: `0.17.1+mc26.3`. The repo's `minecraft-src/` is not generated, s
 | D3 | **Slots 0-40 only**, as the brief says and as `Server::slot` does: 0-8 hotbar, 9-35 main, 36-39 armor (feet to head), 40 off hand. Vanilla's player save also covers 41 (body armor) and 42 (saddle) and Steel's `PlayerInventory` has 43 slots; they are **left out** (see O1). |
 | D4 | **Capture is strict.** It encodes each stack through the strict path (`DataComponentPatch::try_to_nbt_tag_ref`, as `validate_persistent_encoding` does) and fails naming the slot if a stack cannot be encoded, instead of using the save-time path that logs and omits invalid fields. A snapshot is therefore lossless or absent. |
 | D5 | **Restore is all-or-nothing.** The blob is fully decoded and validated (known item ids, valid components, counts 1-99, slot range, game mode id) before the player is touched. On any error the player is unchanged. |
-| D6 | **Restore replaces slots 0-40**, so slots absent from the snapshot become empty. It sets the selected hotbar slot and the game mode. The game mode goes through the same path as `Server::set_game_mode`, so abilities and client packets follow vanilla. Slots 41 and 42, XP, health, effects and the ender chest are not touched. |
+| D6 | **Restore replaces slots 0-40**, so slots absent from the snapshot become empty. It sets the selected hotbar slot and the game mode. The game mode goes through `Player::set_game_mode`, so abilities and client packets follow vanilla. **Approved deviation:** if a game mode change event cancels the change, restore returns an error (the caller must see the failure) instead of the silent success `Server::set_game_mode` gives. The game mode is applied first, so a cancelled change leaves slots untouched. Slots 41 and 42, XP, health, effects and the ender chest are not touched. |
 | D7 | **No migrations.** A snapshot carries a `format` number only. Restore rejects a format it does not know. The project is in early development (AGENTS.md), and Steel has no data-version constant to stamp (research R6); see O2. |
 | D8 | **Non-persistent components are not captured**, exactly as vanilla does not save them: those declared with `networkSynchronized` only, such as `creative_slot_lock` and `additional_trade_cost` (research R4). A kit is a saved inventory, not a live copy. |
 
@@ -66,7 +66,8 @@ The orchestrator writes `data` to its own storage and reads it back after a serv
 - A player with an inventory screen or cursor item open: only slots 0-40 of the player inventory are read or written; the cursor item is not part of the snapshot.
 - Offline or unknown player: error, as the existing slot bindings.
 - Restore while the player is in the middle of a world or domain switch: not specified here; it behaves as `set_slot` does today (O3).
-- After restore, the client sees the new inventory the same tick (the same resync `set_slot` triggers).
+- After restore, the client sees the new inventory the same tick (the same resync `set_slot` triggers). `broadcast_inventory_changes` syncs menu slots only, not the selected hotbar slot, so restore also sends `CSetHeldSlot` as `set_held_slot` does.
+- A game mode change event cancels the mode change: restore fails with an error and the player is unchanged.
 
 ## Requirements *(mandatory)*
 
@@ -106,6 +107,6 @@ The orchestrator writes `data` to its own storage and reads it back after a serv
 
 - **O1 (confirm)**: slots 41 (body armor) and 42 (saddle) exist in vanilla's `Inventory` and in Steel's 43-slot `PlayerInventory`. The brief says 0-40. Including them is a one-constant change. Proposed: stay with 0-40 (D3).
 - **O2 (confirm)**: stamp the blob with a data version? Steel has no constant for the target world version (vanilla `version.json` has `world_version` 5023). Adding one needs an agreed source (extractor or `Cargo.toml` suffix). Proposed: no stamp now (D7).
-- **O3 (confirm)**: should restore also be allowed to skip the game mode (`restore_inventory(player, &snapshot, apply_game_mode)`), for kits that must not change mode? Proposed: no flag now; the orchestrator can set the mode back, and a later `v2` can add one.
+- **O3 (decided)**: should restore also be allowed to skip the game mode (`restore_inventory(player, &snapshot, apply_game_mode)`), for kits that must not change mode? Proposed: no flag now; the orchestrator can set the mode back, and a later `v2` can add one.
 - **O4 (confirm)**: also expose a single-stack snapshot (`slot_snapshot` / `set_slot_snapshot`) so `ItemSpec`-based commands can stop losing components? Not needed by the orchestrator. Proposed: no.
 - **O5 (confirm)**: which exact component list is the acceptance set for SC-001? Proposed: potion contents, stored enchantments (book), enchantments, custom model data, attribute modifiers, banner patterns, fireworks and firework explosion, container contents (shulker box), bundle contents, custom name and lore, custom data, damage, dyed color, trim.
