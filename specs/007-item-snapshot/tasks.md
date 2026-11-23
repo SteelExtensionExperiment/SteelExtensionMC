@@ -45,4 +45,13 @@ T001 -> T002, T003 -> T004 -> T005, T006 -> T007 -> T010..T013 (T010, T012, T013
 
 ## Status 2026-11-24
 
-T001-T007, T010, T013 done (commit `8ad86a34`). Open: T011 native probe (optional), T012 timing, T014 hand-off. Known deviations: restore also sends `CSetHeldSlot`; a cancelled game mode change event fails the restore (approved 2026-11-24).
+Done: T001-T007, T010, T013 (commits `8ad86a34`, `f06751de`; merged to main as `209009fb`).
+
+Not done, accepted by the coordinator:
+- T011 native probe: not written (was optional). No test calls the two bindings against a real player; only encode/decode and the game-mode helper are unit tested.
+- T012 timing: not measured; SC-003 is unverified.
+- T014 hand-off: done by message to the coordinator, not as a repo file.
+
+Deviations: restore also sends `CSetHeldSlot` (`broadcast_inventory_changes` syncs menu slots only); a game mode change cancelled by an event fails the restore (approved 2026-11-24, game mode applied first).
+
+Outside spec 007: `SignChangeEvent::world()` (`5670b61b`), no test (needs a live test server).
