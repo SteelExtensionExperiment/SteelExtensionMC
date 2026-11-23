@@ -3,8 +3,8 @@ use super::HookRegistration;
 use crate::{
     ApiResult, BlockPos, BlockState,
     runtime::{
-        BotInput, GameMode, Operation, OperationState, OperationStatus, PlayerId, PlayerInfo,
-        Position, WorldSettings,
+        BotInput, CloneSettings, CloneTarget, GameMode, Operation, OperationState, OperationStatus,
+        PlayerId, PlayerInfo, Position, TemplateState, TemplateStatus, WorldSettings,
         api::{Command, Commands, Server},
     },
 };
@@ -18,7 +18,10 @@ use steel_core::{
     inventory::container::Container,
     player::{Player, PlayerInput, bot::BotInput as CoreBotInput, connection::NetworkConnection},
     server::{
-        Server as CoreServer, temporary::TemporaryWorldRequest, world_operations::WorldOperationId,
+        Server as CoreServer,
+        templates::TemplateEntry,
+        temporary::{RuntimeWorldRequest, TemporaryWorldRequest, WorldSource},
+        world_operations::WorldOperationId,
     },
 };
 use steel_registry::{REGISTRY, RegistryExt, item_stack::ItemStack};
@@ -112,6 +115,74 @@ pub(crate) fn create_world(
             default_gamemode: settings.default_game_mode.into_host(),
             difficulty: settings.difficulty.into_host(),
         })
+        .map(|id| Operation { id: id.0 })
+}
+pub(crate) fn create_runtime_world(
+    server: &Arc<CoreServer>,
+    name: &str,
+    generator: &str,
+    target: CloneTarget,
+    settings: WorldSettings,
+) -> Result<Operation, String> {
+    server
+        .create_runtime_world(RuntimeWorldRequest {
+            key: key(name)?,
+            source: WorldSource::Generator {
+                generator: key(generator)?,
+                config: Value::Table(Map::new()),
+            },
+            target: target.into_host(),
+            seed: settings.seed,
+            spawn: super::position(settings.spawn),
+            spawn_angle: 0.0,
+            default_gamemode: settings.default_game_mode.into_host(),
+            difficulty: settings.difficulty.into_host(),
+        })
+        .map(|id| Operation { id: id.0 })
+}
+pub(crate) fn load_world_template(
+    server: &Arc<CoreServer>,
+    name: &str,
+    path: &str,
+) -> Result<Operation, String> {
+    server
+        .load_world_template(key(name)?, path.into())
+        .map(|id| Operation { id: id.0 })
+}
+pub(crate) fn world_template_status(server: &CoreServer, name: &str) -> Option<TemplateStatus> {
+    let entry = server.world_template(&key(name).ok()?)?;
+    Some(match entry {
+        TemplateEntry::Loading => TemplateStatus {
+            state: TemplateState::Loading,
+            message: ApiString::from(""),
+            chunks: 0,
+        },
+        TemplateEntry::Ready(template) => TemplateStatus {
+            state: TemplateState::Ready,
+            message: ApiString::from(""),
+            chunks: u64::try_from(template.chunk_count()).unwrap_or(u64::MAX),
+        },
+        TemplateEntry::Failed(message) => TemplateStatus {
+            state: TemplateState::Failed,
+            message: message.into(),
+            chunks: 0,
+        },
+    })
+}
+pub(crate) fn clone_world(
+    server: &Arc<CoreServer>,
+    template: &str,
+    name: &str,
+    target: CloneTarget,
+    settings: CloneSettings,
+) -> Result<Operation, String> {
+    server
+        .clone_world(
+            &key(template)?,
+            key(name)?,
+            target.into_host(),
+            settings.into_host(),
+        )
         .map(|id| Operation { id: id.0 })
 }
 pub(crate) fn operation_status(
