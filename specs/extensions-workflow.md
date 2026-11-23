@@ -93,5 +93,8 @@ Set after all four specs list their provided and consumed contracts. Known so fa
 - **Extension implementations** that use the new host bindings wait for the matching tasks in spec 005.
   The world cloner's own task list names which. Specs and plans for the other extensions can proceed now,
   against `extension-example/world-cloner/specs/001-world-cloner/contracts/service.md`.
+- **Communication (decided):** services down, hook actions up, no cycles, no `game-registry`; see `specs/extension-communication.md`.
+  Chain: world-cloner ← arena-manager ← game-orchestrator ← stats-visualizer. Contract crates: `world-cloner-api` (after host 005),
+  `arena-manager-api`, `game-orchestrator-api` (both exist). Host spec 007 (item snapshot, for kits) is the next free host spec number.
 - **Stats visualizer** consumes the `game-orchestrator` contract (game types and match results) and depends on host spec 006 (holograms). Its contract needs are in `extension-example/stats-visualizer/specs/001-stats-visualizer/contracts/required-orchestrator.md`, a proposal until the orchestrator spec adopts it. Its tasks T001-T005 need neither.
 - Host changes from any spec are serialized by the user.
