@@ -33,7 +33,7 @@ Both return `Err` for an unknown or offline player and never block. Neither call
 
 ## Blob
 
-Binary NBT, one root compound (named-root form; exact writer to be confirmed in T003):
+Binary NBT, one root compound in the nameless-root (network) form, written with `simdnbt::owned::NbtTag::write` and read with `simdnbt::borrow::read_tag` (confirmed in T001):
 
 ```text
 {

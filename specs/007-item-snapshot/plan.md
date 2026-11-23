@@ -38,8 +38,8 @@ Add `InventorySnapshot` and two `Server` bindings (`inventory_snapshot`, `restor
 
 ## Platform gaps to resolve before or during T003 (stop and ask if confirmed missing)
 
-1. Binary NBT writer for a named-root compound with simdnbt 0.10 (R6).
-2. Strict encode access: `DataComponentPatch::try_to_nbt_tag_ref` is `pub` (`patch_persistence.rs:108`); confirm it is reachable from `steel-extension-api` through `ItemStack::validate_persistent_encoding` / `patch()`.
+1. ~~Binary NBT writer~~ resolved in T001: `NbtTag::Compound(c).write(&mut Vec<u8>)` and `simdnbt::borrow::read_tag` (see `steel-utils/src/nbt/value_input.rs:250`).
+2. ~~Strict encode access~~ resolved in T001: `ItemStack::validate_persistent_encoding` and `patch().try_to_nbt_tag_ref()` are `pub`.
 3. Data version stamp (O2) and slots 41-42 (O1): user decisions, not code gaps.
 
 ## Project structure
