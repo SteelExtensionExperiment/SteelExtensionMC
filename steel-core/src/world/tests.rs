@@ -129,6 +129,7 @@ fn disconnect_while_riding_removes_the_vehicle_like_vanilla() {
     );
 
     let (player, _domain, saved) = world.detach_player_for_disconnect(Arc::clone(&player));
+    let saved = saved.expect("disconnect should snapshot the player");
 
     assert!(vehicle.is_removed());
     assert_eq!(
