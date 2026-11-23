@@ -5,12 +5,7 @@
 #[path = "lucky_block/fixture.rs"]
 mod fixture;
 
-use std::{
-    env::consts::{DLL_PREFIX, DLL_SUFFIX},
-    error::Error,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{error::Error, path::PathBuf, sync::Arc};
 
 use glam::DVec3;
 use steel_core::{
@@ -41,19 +36,15 @@ const SLUDGE: Identifier = Identifier::new_static("toxic_wasteland", "sludge");
 const BIOME: Identifier = Identifier::new_static("toxic_wasteland", "wasteland");
 const FLOOR_Y: i32 = 64;
 
-fn library() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../extension-example/toxic-wasteland/target/debug")
-        .join(format!("{DLL_PREFIX}toxic_wasteland{DLL_SUFFIX}"))
-}
-
 #[test]
-#[ignore = "requires cargo build --manifest-path extension-example/toxic-wasteland/Cargo.toml"]
+#[ignore = "requires the Toxic Wasteland test ZIP described in its README"]
 fn toxic_wasteland_spreads_tints_hurts_and_persists() -> TestResult {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../extension-example/toxic-wasteland/target/test-extension.zip");
     let mut hooks = ExtensionHooks::default();
-    // SAFETY: this trusted example uses the checked native v3 contract; the host pins
+    // SAFETY: this trusted example uses the checked native v4 contract; the host pins
     // its library and all callback allocations for their required lifetime.
-    let extension = unsafe { host::load(&library(), "", &mut hooks) }?;
+    let extension = unsafe { host::load(&path, "", &mut hooks) }?;
     init_globals();
     // Building these runs the generator and command registration the extension subscribed to.
     let _extensions = RegisteredExtensions::new_with_builtins()?;
@@ -100,7 +91,6 @@ fn check_mobs(world: &Arc<World>) -> TestResult {
         let entity = ENTITIES
             .create(
                 entity_type,
-                next_entity_id(),
                 DVec3::new(x, f64::from(FLOOR_Y + 1), 10.5),
                 Arc::downgrade(world),
             )
@@ -220,7 +210,7 @@ fn check_registration() -> Result<&'static ClientFluid, Box<dyn Error>> {
     assert_eq!(client_fluid(sludge.flowing), &vanilla_fluids::FLOWING_WATER);
     assert!(!REGISTRY.client_content.is_vanilla_fluid(sludge.source));
 
-    // The nuclear blocks are full cubes whose clients see a vanilla carrier plus a head model,
+    // The nuclear blocks are full cubes with a vanilla carrier and a textured cube,
     // and they drop themselves.
     for key in ["uranium_ore", "nuclear_waste"] {
         let key = Identifier::new_static("toxic_wasteland", key);
@@ -519,7 +509,6 @@ fn check_persistence(fixture: &fixture::Fixture, sludge: &ClientFluid) -> TestRe
     let ghoul = ENTITIES
         .create(
             ghoul_type,
-            next_entity_id(),
             DVec3::new(12.5, f64::from(FLOOR_Y + 1), 3.5),
             Arc::downgrade(world),
         )

@@ -8,6 +8,7 @@ use std::{
     io::{self, Read},
     path::{Component, Path, PathBuf},
 };
+use steel_registry::client_content::ResourcePackAssets;
 use tempfile::TempDir;
 use zip::ZipArchive;
 
@@ -28,6 +29,7 @@ pub(super) struct PreparedPackage {
     pub name: String,
     pub library: PathBuf,
     pub directory: TempDir,
+    pub assets: BTreeMap<String, Vec<u8>>,
 }
 
 pub(super) fn prepare(path: &Path) -> Result<PreparedPackage, String> {
@@ -85,11 +87,43 @@ pub(super) fn prepare(path: &Path) -> Result<PreparedPackage, String> {
     output
         .sync_all()
         .map_err(|e| format!("cannot flush extension library: {e}"))?;
+    drop(library);
+    let assets = read_assets(&mut archive)?;
     Ok(PreparedPackage {
         name: manifest.package.name,
         library: path,
         directory,
+        assets,
     })
+}
+
+fn read_assets(archive: &mut ZipArchive<File>) -> Result<BTreeMap<String, Vec<u8>>, String> {
+    let mut assets = BTreeMap::new();
+    let mut remaining = ResourcePackAssets::MAX_BYTES;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        if entry.is_dir() || !entry.name().starts_with("assets/") {
+            continue;
+        }
+        let path = entry.name().to_owned();
+        ResourcePackAssets::asset_path(&path)?;
+        if entry.is_symlink() || assets.contains_key(&path) {
+            return Err(format!(
+                "resource pack asset must be a unique regular file: {path}"
+            ));
+        }
+        let mut bytes = Vec::new();
+        entry
+            .by_ref()
+            .take(remaining + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("cannot read resource pack asset {path}: {error}"))?;
+        remaining = remaining
+            .checked_sub(bytes.len() as u64)
+            .ok_or("extension package exceeds the resource pack asset limit")?;
+        assets.insert(path, bytes);
+    }
+    Ok(assets)
 }
 
 /// Lists archive paths in stable order. A missing extension directory is empty.

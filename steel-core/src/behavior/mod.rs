@@ -25,7 +25,7 @@
 //! ```
 
 mod block;
-use steel_registry::{REGISTRY, RegistryExt as _};
+use steel_registry::REGISTRY;
 pub mod blocks;
 mod consume_effect;
 mod context;

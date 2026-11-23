@@ -6,6 +6,7 @@ use std::{
 };
 
 use crossbeam::channel::{self, Sender};
+use steel_utils::Identifier;
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tokio_util::task::TaskTracker;
@@ -20,14 +21,14 @@ struct WorldTickRequest {
 
 struct WorldTickWorker {
     world: Weak<World>,
-    world_key: Arc<str>,
+    world_key: Identifier,
     requests: Option<Sender<WorldTickRequest>>,
     thread: Option<thread::JoinHandle<()>>,
 }
 
 impl WorldTickWorker {
     fn spawn(index: usize, world: Arc<World>) -> io::Result<Self> {
-        let world_key = Arc::<str>::from(world.key.to_string());
+        let world_key = world.key.clone();
         let world_ref = Arc::downgrade(&world);
         let (request_sender, request_receiver) = channel::bounded::<WorldTickRequest>(1);
         let thread = thread::Builder::new()
@@ -55,7 +56,7 @@ impl WorldTickWorker {
         let (response, receiver) = oneshot::channel();
         let Some(requests) = &self.requests else {
             return Err(WorldTickWorkerError::Unavailable {
-                world: Arc::clone(&self.world_key),
+                world: self.world_key.clone(),
             });
         };
         requests
@@ -65,7 +66,7 @@ impl WorldTickWorker {
                 response,
             })
             .map_err(|_| WorldTickWorkerError::Unavailable {
-                world: Arc::clone(&self.world_key),
+                world: self.world_key.clone(),
             })?;
         Ok(receiver)
     }
@@ -89,9 +90,9 @@ impl Drop for WorldTickWorker {
 #[derive(Debug, Error)]
 pub(super) enum WorldTickWorkerError {
     #[error("world tick worker for {world} is unavailable")]
-    Unavailable { world: Arc<str> },
+    Unavailable { world: Identifier },
     #[error("world tick worker for {world} stopped without returning timings")]
-    MissingResponse { world: Arc<str> },
+    MissingResponse { world: Identifier },
 }
 
 pub(super) struct WorldTickWorkers {
@@ -146,6 +147,10 @@ impl WorldTickWorkers {
         Ok(())
     }
 
+    pub(super) fn keys(&self) -> impl Iterator<Item = &Identifier> {
+        self.workers.iter().map(|worker| &worker.world_key)
+    }
+
     pub(super) async fn tick_all(
         &self,
         tick_count: u64,
@@ -162,7 +167,7 @@ impl WorldTickWorkers {
                 response
                     .await
                     .map_err(|_| WorldTickWorkerError::MissingResponse {
-                        world: Arc::clone(&worker.world_key),
+                        world: worker.world_key.clone(),
                     })?,
             );
         }

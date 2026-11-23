@@ -4,6 +4,7 @@ mod biome;
 mod definition;
 mod entity;
 mod fluid;
+pub(crate) mod resource_pack;
 pub(crate) use biome::register_biome;
 pub(crate) use entity::register_entity;
 pub(crate) use fluid::register_fluid;
@@ -15,7 +16,9 @@ use std::sync::{Arc, OnceLock};
 use glam::{Quat, Vec3};
 use steel_registry::{
     Registry, RegistryExt,
-    client_content::{self, BedModel, BedRegistration, BlockItemDisplay, PlacingItem},
+    client_content::{
+        self, BedModel, BedRegistration, BlockDisplayTransform, BlockItemDisplay, PlacingItem,
+    },
     data_components::{
         DataComponentMap, DataComponentPatch,
         vanilla_components::{ITEM_MODEL, ITEM_NAME, MAX_STACK_SIZE, PROFILE},
@@ -120,19 +123,27 @@ pub(crate) fn register_block_item(
     registry: &mut Registry,
     definition: BlockItemDefinition,
 ) -> Result<BlockState, String> {
-    let block = definition::prepare(registry, definition.block)?;
-    let (item, fallback) = prepare_item(registry, definition.item)?;
-    let block = registry.register_block_definition(
-        block,
-        Some(PlacingItem {
-            item,
-            fallback,
-            drop_self: definition.drop_self,
-        }),
-    )?;
+    let (block, placing) = prepare_block_item(registry, definition)?;
+    let block = registry.register_block_definition(block, Some(placing))?;
     Ok(BlockState {
         id: registry.blocks.get_default_state_id(block).0,
     })
+}
+
+fn prepare_block_item(
+    registry: &Registry,
+    definition: BlockItemDefinition,
+) -> Result<(client_content::BlockDefinition, PlacingItem), String> {
+    let block = definition::prepare(registry, definition.block)?;
+    let (item, fallback) = prepare_item(registry, definition.item)?;
+    Ok((
+        block,
+        PlacingItem {
+            item,
+            fallback,
+            drop_self: definition.drop_self,
+        },
+    ))
 }
 
 pub(crate) fn slab_materials(registry: &Registry) -> ApiVec<SlabMaterial> {
@@ -242,6 +253,13 @@ fn prepare_displays(
                 translation: Vec3::from_array(display.translation),
                 scale: Vec3::from_array(display.scale),
                 rotation: Quat::from_array(display.rotation),
+                pack_transform: display.pack_transform.as_ref().map(|transform| {
+                    BlockDisplayTransform {
+                        translation: Vec3::from_array(transform.translation),
+                        scale: Vec3::from_array(transform.scale),
+                        rotation: Quat::from_array(transform.rotation),
+                    }
+                }),
             })
         })
         .collect::<Result<Vec<_>, String>>()

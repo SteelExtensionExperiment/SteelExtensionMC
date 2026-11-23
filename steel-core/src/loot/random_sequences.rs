@@ -203,7 +203,7 @@ impl DomainRandomSequences {
     pub(crate) async fn load(worlds: &WorldMap) -> io::Result<Self> {
         let mut domains = BTreeMap::new();
         for domain in worlds.domain_names() {
-            let world = worlds.default_world(domain).ok_or_else(|| {
+            let world = worlds.default_world(&domain).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::NotFound,
                     format!("domain {domain} has no default world"),
@@ -218,7 +218,7 @@ impl DomainRandomSequences {
             for world in worlds.values().filter(|world| world.domain() == domain) {
                 *world.random_sequences.write() = Some(Arc::clone(&sequences));
             }
-            domains.insert(domain.to_owned(), sequences);
+            domains.insert(domain, sequences);
         }
         Ok(Self {
             domains,

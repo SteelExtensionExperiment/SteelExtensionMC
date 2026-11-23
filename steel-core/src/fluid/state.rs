@@ -6,13 +6,13 @@
 use std::sync::Arc;
 
 use glam::DVec3;
+use steel_registry::REGISTRY;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
 use steel_registry::blocks::properties::BlockStateProperties;
 use steel_registry::fluid::{FluidRef, FluidState};
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::vanilla_blocks;
-use steel_registry::{REGISTRY, RegistryExt as _};
 use steel_utils::{BlockPos, BlockStateId, Direction};
 
 use crate::behavior::FLUID_BEHAVIORS;

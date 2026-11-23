@@ -71,8 +71,8 @@ impl core_types::BlockEntity for Adapter {
         let result = self.implementation.game_event_listener();
         result.match_owned(|value| Some(value.into_host()), || None)
     }
-    fn apply_components_from_item(&self, item: &core_types::ItemStack) {
+    fn apply_components_from_item_stack(&self, item: &core_types::ItemStack) {
         self.implementation
-            .apply_components_from_item(ItemStackRef::from_host(item));
+            .apply_components_from_item_stack(ItemStackRef::from_host(item));
     }
 }

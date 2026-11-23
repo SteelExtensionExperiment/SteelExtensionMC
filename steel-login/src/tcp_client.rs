@@ -26,7 +26,10 @@ use steel_protocol::{
     packet_traits::{ClientPacket, CompressionInfo, EncodedPacket, ServerPacket},
     packet_writer::TCPNetworkEncoder,
     packets::{
-        common::{CDisconnect, SClientInformation, SCustomPayload, SPingRequest},
+        common::{
+            CDisconnect, CKeepAlive, CResourcePackPush, SClientInformation, SCustomPayload,
+            SKeepAlive, SPingRequest, SResourcePack,
+        },
         config::SSelectKnownPacks,
         handshake::{ClientIntent, SClientIntention},
         login::{CLoginDisconnect, SHello, SKey},
@@ -53,15 +56,18 @@ use tokio::{
         broadcast::{self, Sender, error::RecvError},
         mpsc::{self, UnboundedReceiver, UnboundedSender, error::TryRecvError},
     },
-    time::timeout,
+    time::{Instant, interval_at, timeout},
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use uuid::Uuid;
 
-use crate::pre_play_state::{PacketSequenceError, PrePlayPacket, PrePlayState};
+use crate::pre_play_state::{
+    ConfigurationPhase, PacketSequenceError, PrePlayPacket, PrePlayPhase, PrePlayState,
+};
 
 const MAX_TICKS_BEFORE_LOGIN: u64 = 600;
 const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(1);
+const CONFIG_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct LoginDeadline {
@@ -228,6 +234,8 @@ pub struct JavaTcpClient {
     /// Notification for when connection updates are processed.
     pub connection_updated: Arc<Notify>,
 
+    pub(crate) resource_pack: Option<Arc<CResourcePackPush>>,
+    pub(crate) config_keep_alive: AtomicCell<Option<i64>>,
     pub(crate) pre_play_state: SyncMutex<PrePlayState>,
     pub(crate) login_deadline: AtomicCell<Option<LoginDeadline>>,
     task_tracker: TaskTracker,
@@ -299,12 +307,21 @@ impl JavaTcpClient {
             challenge: AtomicCell::new([0; 4]),
             connection_updates,
             connection_updated: Arc::new(Notify::new()),
+            resource_pack: None,
+            config_keep_alive: AtomicCell::new(None),
             pre_play_state: SyncMutex::new(PrePlayState::new()),
             login_deadline: AtomicCell::new(None),
             task_tracker,
         };
 
         (client, recv, TCPNetworkDecoder::new(BufReader::new(read)))
+    }
+
+    /// Offers the generated resource pack during configuration.
+    #[must_use]
+    pub fn with_resource_pack(mut self, pack: Option<Arc<CResourcePackPush>>) -> Self {
+        self.resource_pack = pack;
+        self
     }
 
     /// Closes the connection.
@@ -345,17 +362,48 @@ impl JavaTcpClient {
         packet: &EncodedPacket,
     ) -> Result<(), PacketError> {
         let mut network_writer = network_writer.lock().await;
-        let Some(mut writer) = network_writer.take() else {
+        Self::write_with_locked_encoder(&mut network_writer, packet).await
+    }
+
+    async fn write_with_locked_encoder(
+        encoder: &mut Option<TCPNetworkEncoder<BufWriter<JavaTransportWrite>>>,
+        packet: &EncodedPacket,
+    ) -> Result<(), PacketError> {
+        let Some(mut writer) = encoder.take() else {
             return Err(PacketError::ConnectionClosed);
         };
         // Cancellation or failure drops the encoder instead of reusing a partial encrypted write.
-        match writer.write_packet(packet).await {
-            Ok(()) => {
-                *network_writer = Some(writer);
-                Ok(())
-            }
-            Err(error) => Err(error),
+        writer.write_packet(packet).await?;
+        *encoder = Some(writer);
+        Ok(())
+    }
+
+    async fn tick_configuration_keep_alive(&self) -> Result<bool, PacketError> {
+        let mut writer = self.network_writer.lock().await;
+        // Taking the write lock before checking the phase keeps this packet ahead
+        // of Finish Configuration, even when the pack finishes concurrently.
+        if self.pre_play_state.lock().phase()
+            != PrePlayPhase::Configuration(ConfigurationPhase::ResourcePack)
+        {
+            return Ok(true);
         }
+        if self.config_keep_alive.load().is_some() {
+            return Ok(false);
+        }
+        let elapsed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| PacketError::Other(format!("invalid keep-alive clock: {error}")))?;
+        let now = i64::try_from(elapsed.as_millis()).map_err(|error| {
+            PacketError::Other(format!("invalid keep-alive timestamp: {error}"))
+        })?;
+        let packet = EncodedPacket::from_bare(
+            CKeepAlive::new(now),
+            self.compression.load(),
+            ConnectionProtocol::Config,
+        )?;
+        self.config_keep_alive.store(Some(now));
+        Self::write_with_locked_encoder(&mut writer, &packet).await?;
+        Ok(true)
     }
 
     async fn release_network_writer(network_writer: &JavaNetworkWriter) {
@@ -386,6 +434,12 @@ impl JavaTcpClient {
         let id = self.id;
         let mut connection_updates_recv = self.connection_updates.subscribe();
         let connection_updated = Arc::clone(&self.connection_updated);
+        let pack_connection = self.resource_pack.as_ref().map(|_| Arc::clone(self));
+        let mut config_timer = interval_at(
+            Instant::now() + CONFIG_KEEP_ALIVE_INTERVAL,
+            CONFIG_KEEP_ALIVE_INTERVAL,
+        );
+        config_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         self.task_tracker.spawn(async move {
             let mut connection = None;
@@ -395,6 +449,26 @@ impl JavaTcpClient {
                     () = cancel_token.cancelled() => {
                         Self::write_queued_disconnect(&network_writer, &mut sender_recv, id).await;
                         break;
+                    }
+                    _ = config_timer.tick(), if pack_connection.is_some() => {
+                        if let Some(client) = &pack_connection {
+                            let result = select! {
+                                () = cancel_token.cancelled() => break,
+                                result = client.tick_configuration_keep_alive() => result,
+                            };
+                            match result {
+                                Ok(true) => {}
+                                Ok(false) => {
+                                    client.kick_with_flush_timeout(translations::DISCONNECT_TIMEOUT.msg().component(), "resource-pack keep-alive").await;
+                                    break;
+                                }
+                                Err(error) => {
+                                    log::debug!("Configuration keep-alive for client {id} failed: {error}");
+                                    cancel_token.cancel();
+                                    break;
+                                }
+                            }
+                        }
                     }
                     outbound = sender_recv.recv() => {
                         if let Some(outbound) = outbound {
@@ -802,6 +876,23 @@ impl JavaTcpClient {
                     return Ok(self.reject_unexpected_packet(error).await);
                 }
                 self.handle_select_known_packs(SSelectKnownPacks::read_packet(data)?)
+                    .await;
+                Ok(ConnectionAction::none())
+            }
+            config::S_KEEP_ALIVE => {
+                let response = SKeepAlive::read_packet(data)?;
+                if self
+                    .config_keep_alive
+                    .compare_exchange(Some(response.id), None)
+                    .is_err()
+                {
+                    self.kick(translations::DISCONNECT_TIMEOUT.msg().component())
+                        .await;
+                }
+                Ok(ConnectionAction::none())
+            }
+            config::S_RESOURCE_PACK => {
+                self.handle_resource_pack_response(SResourcePack::read_packet(data)?)
                     .await;
                 Ok(ConnectionAction::none())
             }

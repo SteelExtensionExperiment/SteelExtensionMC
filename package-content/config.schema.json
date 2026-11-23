@@ -280,6 +280,37 @@
           },
           "additionalProperties": false
         },
+        "resource_pack": {
+          "type": "object",
+          "description": "Combined extension resource pack generation and delivery.",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": ["disabled", "optional", "required"],
+              "default": "disabled",
+              "description": "Whether players are offered the pack and whether loading it is required."
+            },
+            "output": {
+              "type": "string",
+              "default": "resource-pack.zip",
+              "description": "Path where Steel writes the combined ZIP on startup."
+            },
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Public HTTP(S) URL to the combined ZIP. Required when enabled."
+            },
+            "bind": {
+              "type": "string",
+              "description": "Optional socket address for Steel's built-in HTTP listener."
+            },
+            "include_zips": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "Additional ZIPs whose assets are merged with extension assets."
+            }
+          }
+        },
         "hud": {
           "type": "object",
           "description": "Server-owned layout for HUD contributions; works with vanilla clients without resource packs.",

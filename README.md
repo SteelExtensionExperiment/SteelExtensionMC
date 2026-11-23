@@ -85,6 +85,22 @@ ZIP packages can be configured through `[[extensions]]`; ZIP packages and
 libraries in `./extensions` are discovered automatically and loaded in dependency
 order.
 
+Steel can combine extension textures and additional resource-pack ZIPs on startup.
+This `config/config.toml` example offers the pack from Steel's HTTP listener.
+
+```toml
+[server.resource_pack]
+mode = "optional" # disabled, optional, or required
+output = "resource-pack.zip"
+url = "http://play.example.com:25567/resource-pack.zip"
+bind = "0.0.0.0:25567"
+```
+
+Omit `bind` and point `url` at your existing web server to serve the generated
+ZIP externally. Set `include_zips` to merge additional packs' asset files. The
+URL must be reachable from Minecraft clients. Rebuild native extensions for the
+current ABI.
+
 Start with [creating an extension](doc/extensions/getting-started.md) and the
 [API reference](doc/extensions/api.md). The
 [extension examples](extension-example/README.MD) demonstrate block behaviors,

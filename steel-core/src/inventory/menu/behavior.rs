@@ -457,7 +457,7 @@ impl MenuBehavior {
         let mut changed: Vec<(usize, ItemStack)> = Vec::new();
         for index in 0..self.slots.len() {
             let item = self.slots[index].get_item(&guard);
-            if self.remote_slots[index].matches(item) {
+            if self.remote_slots[index].matches(item, connection.uses_resource_pack()) {
                 // Cache a matched hash as Known to avoid re-hashing next tick.
                 if matches!(self.remote_slots[index], RemoteSlot::Hashed(_)) {
                     self.remote_slots[index] = RemoteSlot::Known(item.clone());
@@ -472,7 +472,10 @@ impl MenuBehavior {
             self.synchronize_slot_to_remote(index, item, connection);
         }
 
-        if self.remote_carried.matches(&self.carried) {
+        if self
+            .remote_carried
+            .matches(&self.carried, connection.uses_resource_pack())
+        {
             if matches!(self.remote_carried, RemoteSlot::Hashed(_)) {
                 self.remote_carried = RemoteSlot::Known(self.carried.clone());
             }
@@ -919,18 +922,20 @@ impl RemoteSlot {
 
     /// Checks if the remote slot matches the local `ItemStack`.
     #[must_use]
-    pub fn matches(&self, local: &ItemStack) -> bool {
+    pub fn matches(&self, local: &ItemStack, uses_pack: bool) -> bool {
         match self {
             Self::Unknown => false,
             Self::Known(remote) => ItemStack::matches(remote, local),
-            Self::Hashed(hash) => hashed_stack_matches(hash, local),
+            Self::Hashed(hash) => hashed_stack_matches(hash, local, uses_pack),
         }
     }
 }
 
 /// Checks if a hashed stack matches the given `ItemStack`.
-fn hashed_stack_matches(hash: &HashedStack, item: &ItemStack) -> bool {
-    let Ok(client_item) = client_stack(item) else {
+fn hashed_stack_matches(hash: &HashedStack, item: &ItemStack, uses_pack: bool) -> bool {
+    let (client_item, _) =
+        steel_registry::client_content::project_pack_models(uses_pack, || client_stack(item));
+    let Ok(client_item) = client_item else {
         return false;
     };
     let item = client_item.as_ref();

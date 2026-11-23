@@ -2,8 +2,9 @@
 
 Extensions can register real server item and block identities. Steel saves those
 identities and translates them into vanilla items and block states when sending
-packets. Clients need neither a mod nor a resource pack for the head-based model
-in the [lucky-block example](../../extension-example/lucky-block/README.md).
+packets. Steel uses each item's vanilla base by default for clients without the
+resource pack. The [lucky-block example](../../extension-example/lucky-block/README.md)
+supplies a head skin fallback for both the inventory item and the placed block.
 
 This separation follows the approach used by
 [Polymer](https://github.com/Patbox/polymer/tree/dev/26.3). Steel owns the network
@@ -78,9 +79,12 @@ strings, vectors, and options; collect owned model parts with
 optional `HeadProfile`. A profile requires `minecraft:player_head`; its `id` is
 the four signed integers used by vanilla NBT UUIDs, and `texture` is the base64
 `textures` property. `ItemAppearance::model` optionally selects an independent
-item-model key (the `minecraft:item_model` component). Existing vanilla models
-work without a pack; custom keys require their assets on the client. Steel preserves the supplied property rather than resolving
-an account name.
+item-model key (the `minecraft:item_model` component). Steel sends custom model
+keys from the combined pack to clients that load it. Other clients see the
+registered vanilla base or the head skin supplied by `register_head_fallback`. For full-cube blocks, use
+`BlockItemDefinition::with_cube_model(key)` to share the model between the
+placing item and the placed display. A profile uses the supplied textures
+property directly.
 
 `BlockDefinition::new(key)` creates an independent server block. It uses native
 configuration defaults and a full-cube shape. A vanilla block is not required as
@@ -248,13 +252,10 @@ client-only attachments. They have no gameplay collision and are not saved as
 independent world entities. Reloading a chunk reconstructs the model from its
 custom block state.
 
-The lucky-block model uses a
-[yellow question-mark skin](https://minecraft-heads.com/custom-heads/head/4663-lucky-block-yellow)
-by Luck for both inventory and placement. One head is enlarged to one block, so
-each face shows the whole design. A 0.2% margin covers the opaque planks surface
-without coincident faces; collision remains exactly one full block. Minecraft
-obtains the skin through its normal texture mechanism; no server resource pack
-is required. Multi-part models remain supported by supplying several displays.
+The Lucky Block example packages its PNG and model JSON files under `assets/lucky/`
+and chooses one published player head through `register_head_fallback`. Clients
+without the pack see that head in inventory and as a fitted display on the
+placed block. The 0.2% model margin covers the planks carrier.
 
 ## Translation and persistence
 

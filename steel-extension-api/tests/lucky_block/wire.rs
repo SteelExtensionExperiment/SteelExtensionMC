@@ -52,9 +52,9 @@ pub fn check(block: BlockRef, item: ItemRef) -> Result<(), Box<dyn Error>> {
     }
 
     // The server counts custom-item statistics, but the vanilla client must not
-    // receive their server-only IDs or have its head statistic overwritten.
+    // receive their server-only IDs or have its vanilla statistic overwritten.
     let custom_stat = vanilla_stat_types::ITEM_USED.get(item);
-    let vanilla_stat = vanilla_stat_types::ITEM_USED.get(&vanilla_items::PLAYER_HEAD);
+    let vanilla_stat = vanilla_stat_types::ITEM_USED.get(&vanilla_items::OAK_PLANKS);
     actual.clear();
     CAwardStats {
         stats: vec![(custom_stat, 3), (vanilla_stat, 5)],

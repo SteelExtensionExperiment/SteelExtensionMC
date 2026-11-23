@@ -261,7 +261,7 @@ impl PerfMetadata {
             worlds: server
                 .worlds
                 .values()
-                .map(|world| (world.key.clone(), WorldMetadataReport::capture(world)))
+                .map(|world| (world.key.clone(), WorldMetadataReport::capture(&world)))
                 .collect(),
         }
     }

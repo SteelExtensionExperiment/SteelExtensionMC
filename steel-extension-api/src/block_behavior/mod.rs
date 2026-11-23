@@ -28,7 +28,7 @@ use types::{
     InteractionHand, Inventory, ItemStack, ItemStackRef, ItemStacks, LandingContext, LevelAccessor,
     LevelReader, PathComputationType, PickupResult, PlacementSource, Player, Projectile, RailRef,
     ScheduledTickAccess, SignalQueryContext, SupportType, UpdateFlags, Vector3, VoxelShape,
-    WeakWorld,
+    WeakWorld, WorldRef,
 };
 
 include!("schema.rs");

@@ -6,7 +6,7 @@ use steel_registry::{
     Registry, RegistryExt,
     blocks::{
         Block, BlockLightProperties, BlockRef, StateBooleanData,
-        behavior::{BlockConfig, OffsetType},
+        behavior::BlockConfig,
         shapes::{VoxelShape, is_shape_full_block},
         state_data::BlockStateData,
     },
@@ -173,8 +173,8 @@ fn geometry(
         let geometry = registry
             .blocks
             .by_key(&id)
-            .filter(|b| registry.client_content.is_vanilla_block(b))
-            .ok_or("unknown vanilla geometry")?;
+            .filter(|block| registry.supports_block_geometry_source(block))
+            .ok_or("geometry must use a vanilla static block or a shelf")?;
         let mut names = BTreeSet::new();
         if source
             .properties
@@ -194,17 +194,10 @@ fn geometry(
             )
             .ok_or("invalid geometry properties")?;
         let offset = state.0 - registry.blocks.get_base_state_id(geometry).0;
-        if geometry.config.offset_type != OffsetType::None
-            || geometry.config.dynamic_shape
-            || geometry.config.is_air
-            || geometry.config.liquid
-            || registry.block_entity_types.has_block_entity(geometry)
-            || !geometry.fluid_state.value(offset).is_empty()
+        if !geometry.fluid_state.value(offset).is_empty()
             || geometry.get_outline_shape(offset).is_empty()
         {
-            return Err(
-                "geometry must be static, targetable, dry, and without a block entity".into(),
-            );
+            return Err("geometry must be dry and targetable".into());
         }
         block.collision_shape = BlockStateData::Fixed(geometry.get_collision_shape(offset));
         block.support_shape = BlockStateData::Fixed(geometry.get_support_shape(offset));

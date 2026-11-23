@@ -15,7 +15,6 @@ fn flying_bat(world: &Arc<World>) -> Result<SharedEntity, String> {
     let bat = ENTITIES
         .create(
             &vanilla_entities::BAT,
-            next_entity_id(),
             DVec3::new(8.5, 66.0, 8.0),
             Arc::downgrade(world),
         )

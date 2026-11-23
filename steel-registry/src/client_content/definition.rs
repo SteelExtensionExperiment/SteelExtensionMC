@@ -75,7 +75,8 @@ impl Registry {
                 self.horizontal_definition(
                     &mut block,
                     &displays,
-                    preferred_geometry.or(mining_material),
+                    preferred_geometry,
+                    mining_material,
                     allow_approximation,
                     placement,
                 )
@@ -95,7 +96,8 @@ impl Registry {
             self.select_client_state(
                 block.get_collision_shape(0),
                 block.get_outline_shape(0),
-                preferred_geometry.or(mining_material),
+                preferred_geometry,
+                mining_material,
                 allow_approximation,
             )?
         };
@@ -147,6 +149,9 @@ impl Registry {
                 || display.scale.min_element() <= 0.0
                 || !display.rotation.is_finite()
                 || (display.rotation.length_squared() - 1.0).abs() > 1.0e-4
+                || display
+                    .pack_transform
+                    .is_some_and(|transform| !transform.is_valid())
             {
                 return Err("block displays require a registered vanilla item, finite transforms, positive scales, and unit rotation quaternions".into());
             }

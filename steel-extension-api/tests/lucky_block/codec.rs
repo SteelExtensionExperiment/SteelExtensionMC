@@ -1,16 +1,20 @@
 use std::{borrow::Cow, error::Error, io::Cursor};
 
 use simdnbt::{FromNbtTag, borrow::read_tag};
+use steel_protocol::{
+    packet_traits::EncodedPacket, packets::game::CContainerSetSlot, utils::ConnectionProtocol,
+};
 use steel_registry::{
     ItemStackTemplate, REGISTRY, RegistryEntry, RegistryExt,
-    client_content::{client_stack, restore_client_stack},
+    client_content::{client_stack, project_pack_models, restore_client_stack},
     data_components::{
         ComponentPatchEntry, DataComponentPatch,
         components::BundleContents,
-        vanilla_components::{BUNDLE_CONTENTS, CUSTOM_DATA, MAX_STACK_SIZE, PROFILE},
+        vanilla_components::{BUNDLE_CONTENTS, CUSTOM_DATA, ITEM_MODEL, MAX_STACK_SIZE, PROFILE},
     },
     item_stack::ItemStack,
     items::ItemRef,
+    packets::play::C_CONTAINER_SET_SLOT,
     vanilla_items,
 };
 use steel_utils::{
@@ -21,8 +25,20 @@ use steel_utils::{
 pub fn check(item: ItemRef) -> Result<(), Box<dyn Error>> {
     let stack = ItemStack::with_count(item, 7);
     let projected = client_stack(&stack)?;
-    assert_eq!(projected.item(), &*vanilla_items::PLAYER_HEAD);
+    assert!(projected.is(&vanilla_items::PLAYER_HEAD));
+    assert_eq!(
+        projected.get(ITEM_MODEL),
+        vanilla_items::PLAYER_HEAD
+            .components
+            .get(ITEM_MODEL)
+            .as_ref()
+    );
+    let (with_pack, _) = project_pack_models(true, || client_stack(&stack));
+    let with_pack = with_pack?;
+    assert!(with_pack.is(&vanilla_items::OAK_PLANKS));
+    assert_eq!(with_pack.get(ITEM_MODEL), Some(&item.key));
     assert!(projected.get(PROFILE).is_some());
+    assert!(with_pack.get(PROFILE).is_none());
     assert_eq!(projected.get(MAX_STACK_SIZE), Some(&64));
     assert!(projected.get(CUSTOM_DATA).is_some());
 
@@ -36,15 +52,21 @@ pub fn check(item: ItemRef) -> Result<(), Box<dyn Error>> {
     );
     let client_patch = DataComponentPatch::read(&mut cursor)?;
     let client_view = ItemStack::with_count_and_patch(&vanilla_items::PLAYER_HEAD, 7, client_patch);
-    assert_eq!(client_view.get(PROFILE), stack.get(PROFILE));
+    assert_eq!(client_view.get(ITEM_MODEL), projected.get(ITEM_MODEL));
+    assert_eq!(client_view.get(PROFILE), projected.get(PROFILE));
     assert_eq!(cursor.position() as usize, wire.len());
     let restored = ItemStack::read(&mut Cursor::new(wire.as_slice()))?;
     assert!(ItemStack::matches(&stack, &restored));
 
     check_creative(&stack, &projected)?;
+    check_creative(&stack, &with_pack)?;
+    check_shared_slot_packet(&stack, &projected, &with_pack)?;
 
     let mut counterfeit = projected.into_owned();
     counterfeit.item = &vanilla_items::STONE;
+    assert!(restore_client_stack(counterfeit).is_err());
+    let mut counterfeit = client_view;
+    counterfeit.remove(PROFILE);
     assert!(restore_client_stack(counterfeit).is_err());
     let mut raw_server_id = Vec::new();
     VarInt(1).write(&mut raw_server_id)?;
@@ -52,8 +74,8 @@ pub fn check(item: ItemRef) -> Result<(), Box<dyn Error>> {
     DataComponentPatch::new().write(&mut raw_server_id)?;
     assert!(ItemStack::read(&mut Cursor::new(raw_server_id.as_slice())).is_err());
     assert!(
-        restore_client_stack(ItemStack::new(&vanilla_items::PLAYER_HEAD))?
-            .is(&vanilla_items::PLAYER_HEAD)
+        restore_client_stack(ItemStack::new(&vanilla_items::OAK_PLANKS))?
+            .is(&vanilla_items::OAK_PLANKS)
     );
 
     // Nested custom items affect both the component bytes and their persistent
@@ -100,12 +122,43 @@ pub fn check(item: ItemRef) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn check_shared_slot_packet(
+    stack: &ItemStack,
+    no_pack: &ItemStack,
+    with_pack: &ItemStack,
+) -> Result<(), Box<dyn Error>> {
+    let packet = EncodedPacket::from_bare(
+        CContainerSetSlot {
+            container_id: 0,
+            state_id: 1,
+            slot: 2,
+            item_stack: stack.clone(),
+        },
+        None,
+        ConnectionProtocol::Play,
+    )?;
+    for (uses_pack, expected) in [(false, no_pack), (true, with_pack)] {
+        let packet = packet.clone().for_resource_pack(uses_pack);
+        let mut data = super::fixture::packet_payload(&packet, C_CONTAINER_SET_SLOT)
+            .ok_or("missing slot payload")?;
+        assert_eq!(VarInt::read(&mut data)?.0, 0);
+        assert_eq!(VarInt::read(&mut data)?.0, 1);
+        assert_eq!(i16::read(&mut data)?, 2);
+        assert_eq!(VarInt::read(&mut data)?.0, expected.count());
+        assert_eq!(VarInt::read(&mut data)?.0, expected.item().id() as i32);
+        assert_eq!(&DataComponentPatch::read(&mut data)?, expected.patch());
+    }
+    Ok(())
+}
+
 fn check_component_overrides(item: ItemRef) -> Result<(), Box<dyn Error>> {
     let mut altered = ItemStack::with_count(item, 3);
     altered.set(MAX_STACK_SIZE, 16);
-    altered.remove(PROFILE);
+    altered.remove(ITEM_MODEL);
     let projected = client_stack(&altered)?;
     assert_eq!(projected.get(MAX_STACK_SIZE), Some(&16));
+    assert!(projected.get(ITEM_MODEL).is_none());
+    assert!(projected.is(&vanilla_items::OAK_PLANKS));
     assert!(projected.get(PROFILE).is_none());
     let mut bytes = Vec::new();
     altered.write(&mut bytes)?;

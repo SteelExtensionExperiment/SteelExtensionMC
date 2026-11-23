@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 use steel_utils::{BlockStateId, Identifier, locks::SyncMutex};
 
@@ -6,10 +6,9 @@ use crate::{
     Registry, RegistryEntry, RegistryExt,
     blocks::{Block, BlockRef, StateBooleanData, StateFluidData, state_data::BlockStateData},
     items::{Item, ItemRef},
-    loot_table::LootTable,
 };
 
-use super::{BlockItemDisplay, ClientBlock};
+use super::{BlockDefinition, BlockItemDisplay, ClientBlock, PackHeadFallback, PlacingItem};
 
 type RegistrationHook = Box<dyn FnOnce(&mut Registry) + Send>;
 static REGISTRATION_HOOKS: SyncMutex<Option<Vec<RegistrationHook>>> =
@@ -46,6 +45,56 @@ pub(crate) fn run_registration_hooks(registry: &mut Registry) {
 }
 
 impl Registry {
+    /// Adds extension assets before freezing the custom content registries.
+    pub fn register_pack_assets(&mut self, files: BTreeMap<String, Vec<u8>>) -> Result<(), String> {
+        if self.client_content.frozen {
+            return Err("resource pack registration has already finished".into());
+        }
+        self.client_content.resource_pack.register(files)
+    }
+
+    /// Associates a contributed item model with head displays for clients without the pack.
+    pub fn register_pack_head_fallback(
+        &mut self,
+        model: Identifier,
+        fallback: PackHeadFallback,
+    ) -> Result<(), String> {
+        if self.client_content.frozen {
+            return Err("resource pack registration has already finished".into());
+        }
+        self.client_content
+            .resource_pack
+            .register_head_fallback(model, fallback)
+    }
+
+    /// Registers a block and its packed model as one startup operation.
+    pub fn register_textured_block_definition(
+        &mut self,
+        definition: BlockDefinition,
+        placing: PlacingItem,
+        files: BTreeMap<String, Vec<u8>>,
+        head_fallback: Option<PackHeadFallback>,
+    ) -> Result<BlockRef, String> {
+        let model = definition.block.key.clone();
+        let pack = &self.client_content.resource_pack;
+        pack.validate_files(&files)?;
+        if let Some(fallback) = &head_fallback {
+            let item_model = format!("assets/{}/items/{}.json", model.namespace, model.path);
+            if !files.contains_key(&item_model) && !pack.has_item_model(&model) {
+                return Err(format!("missing item model {model} for the head fallback"));
+            }
+            pack.validate_head_fallback(&model, fallback)?;
+        }
+        // The block registration checks that registration is open before mutating.
+        let block = self.register_block_definition(definition, Some(placing))?;
+        let pack = &mut self.client_content.resource_pack;
+        pack.insert_validated_files(files);
+        if let Some(fallback) = head_fallback {
+            pack.insert_head_fallback(model, fallback);
+        }
+        Ok(block)
+    }
+
     /// Registers an independent server item with a vanilla client representation.
     /// The item's default components describe the appearance, including its model.
     pub fn register_client_item(
@@ -115,7 +164,7 @@ impl Registry {
             return Err("the block item's block is supplied by this registration".into());
         }
         self.validate_client_block(&key, carrier, material, &displays)?;
-        let block = self.register_client_block(key, carrier, material, None, displays)?;
+        let block = self.register_client_block(key, carrier, material, displays)?;
         item.block = Some(block);
         // The item namespace, duplicate check, and fallback were validated above;
         // registering the block changes neither the item registry nor its fallback.
@@ -136,21 +185,10 @@ impl Registry {
         key: Identifier,
         carrier: BlockStateId,
         material: BlockRef,
-        loot_table: Option<LootTable>,
         displays: Vec<BlockItemDisplay>,
     ) -> Result<BlockRef, String> {
         let (geometry, offset) = self.validate_client_block(&key, carrier, material, &displays)?;
-        if let Some(table) = &loot_table
-            && self.loot_tables.by_key(&table.key).is_some()
-        {
-            return Err(format!("loot table {} is already registered", table.key));
-        }
-        let loot_table = loot_table.map(|table| {
-            let table = Box::leak(Box::new(table));
-            self.loot_tables.register(table);
-            &*table
-        });
-        let block = Self::client_block_definition(key, geometry, offset, material, loot_table);
+        let block = Self::client_block_definition(key, geometry, offset, material);
         let block = Box::leak(Box::new(block));
         let id = self.blocks.register(block);
         self.client_content.blocks.insert(
@@ -219,12 +257,11 @@ impl Registry {
         geometry: BlockRef,
         offset: u16,
         material: BlockRef,
-        loot_table: Option<crate::loot_table::LootTableRef>,
     ) -> Block {
         // Mining and surface properties belong to the material; the selected
         // carrier supplies geometry, positional offsets, and lighting.
         let mut config = material.config.clone();
-        config.loot_table = loot_table;
+        config.loot_table = None;
         config.has_collision = geometry.config.has_collision;
         config.can_occlude = geometry.config.can_occlude;
         config.force_solid_off = geometry.config.force_solid_off;

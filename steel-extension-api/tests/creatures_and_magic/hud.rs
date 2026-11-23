@@ -97,7 +97,6 @@ pub(super) async fn shared_scoreboard(
             let entity = ENTITIES
                 .create(
                     &vanilla_entities::SHEEP,
-                    next_entity_id(),
                     DVec3::new(10.5, 65.0, 8.5),
                     Arc::downgrade(&level),
                 )

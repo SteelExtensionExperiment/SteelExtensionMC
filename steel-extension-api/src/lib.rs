@@ -250,7 +250,7 @@ macro_rules! export_extension {
         }
         #[unsafe(no_mangle)]
         #[$crate::stabby::export(callback, crate = $crate::stabby)]
-        pub fn steel_extension_v3() -> &'static $crate::ExtensionDescriptor {
+        pub fn steel_extension_v4() -> &'static $crate::ExtensionDescriptor {
             static DESCRIPTOR: $crate::ExtensionDescriptor = $crate::ExtensionDescriptor::new(
                 $name,
                 $version,

@@ -28,6 +28,7 @@ impl Bridge for BlockInteraction {
             Self::Host::Keep => Self::Keep,
             Self::Host::Destroy => Self::Destroy,
             Self::Host::DestroyWithDecay => Self::DestroyWithDecay,
+            Self::Host::TriggerBlock => Self::TriggerBlock,
         }
     }
     fn into_host(self) -> Self::Host {
@@ -35,6 +36,7 @@ impl Bridge for BlockInteraction {
             Self::Keep => Self::Host::Keep,
             Self::Destroy => Self::Host::Destroy,
             Self::DestroyWithDecay => Self::Host::DestroyWithDecay,
+            Self::TriggerBlock => Self::Host::TriggerBlock,
         }
     }
 }

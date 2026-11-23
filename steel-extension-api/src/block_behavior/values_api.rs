@@ -9,6 +9,7 @@ pub mod api {
         Vector3,
     };
     use crate::block_behavior::types::{BonemealAction, Inventory, ItemStack, Player};
+    use crate::block_behavior::types::{LevelReader, WorldRef};
     use crate::{ApiResult, BlockState};
     use crate::{BlockPos, World};
     use stabby::string::String as ApiString;
@@ -32,6 +33,14 @@ pub mod api {
                 })
                 .map(ApiString::from)
                 .into()
+        }
+    }
+
+    impl<'a> WorldRef<'a> {
+        /// Views the borrowed world through its read-only level interface.
+        #[must_use]
+        pub fn into_level_reader(self) -> LevelReader<'a> {
+            LevelReader::from_host(self.into_host())
         }
     }
 

@@ -8,6 +8,7 @@ mod groups;
 mod logging;
 mod server;
 
+pub use crate::resource_pack::{ResourcePackConfig, ResourcePackMode};
 pub use groups::FilePermissionGroupStore;
 pub use logging::{LogConfig, LogLevel, LogTimeFormat, RotationTimeFormat};
 pub use server::{ServerConfig, ThreadConfig};

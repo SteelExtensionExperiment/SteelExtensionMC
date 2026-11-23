@@ -117,7 +117,7 @@ when a player runs it.
 
 `#[stabby::export(callback)]` checks boundary types and supplies the callback's
 calling convention. `export_extension!` binds the host API and exports the
-`steel_extension_v3` descriptor. You do not need to write a loader or `unsafe`
+`steel_extension_v4` descriptor. You do not need to write a loader or `unsafe`
 code for this extension. Both entrypoints may also return any
 `Result<(), impl Display>`, so `?` works directly.
 

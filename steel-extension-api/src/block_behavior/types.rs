@@ -31,6 +31,7 @@ host_value!(player_storage, Player<'a> = &'a core_types::Player; read);
 host_value!(block_entity_ref_storage, BlockEntityRef<'a> = &'a dyn core_types::BlockEntity; read);
 host_value!(entity_storage, Entity<'a> = &'a dyn core_types::Entity; read);
 host_value!(level_accessor_storage, LevelAccessor<'a> = &'a dyn core_types::LevelAccessor);
+host_value!(world_ref_storage, WorldRef<'a> = &'a core_types::World);
 host_value!(level_reader_storage, LevelReader<'a> = &'a dyn core_types::LevelReader);
 host_value!(explosion_storage, Explosion<'a> = &'a dyn core_types::Explosion; read);
 host_value!(explosion_drop_consumer_storage, ExplosionDropConsumer<'a> = &'a mut core_types::ExplosionDropConsumer<'a>; reborrow);
@@ -46,6 +47,8 @@ pub enum BlockInteraction {
     Destroy,
     /// Destroy blocks with the explosion radius in their loot context.
     DestroyWithDecay,
+    /// Preserve blocks and trigger their reactions.
+    TriggerBlock,
 }
 host_value!(projectile_storage, Projectile<'a> = &'a dyn core_types::Projectile);
 host_value!(scheduled_tick_access_storage, ScheduledTickAccess<'a> = &'a dyn core_types::ScheduledTickAccess);

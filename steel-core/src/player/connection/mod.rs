@@ -128,6 +128,17 @@ pub enum PlayerConnection {
     Other(Box<dyn NetworkConnection>),
 }
 
+impl PlayerConnection {
+    /// Whether the connection successfully loaded Steel's resource pack.
+    #[must_use]
+    pub const fn uses_resource_pack(&self) -> bool {
+        match self {
+            Self::Java(connection) => connection.uses_resource_pack(),
+            Self::Other(_) => false,
+        }
+    }
+}
+
 impl NetworkConnection for Box<dyn NetworkConnection> {
     fn is_server_controlled(&self) -> bool {
         (**self).is_server_controlled()

@@ -123,6 +123,7 @@ pub struct EncodedPacket {
     // This is optimized for reduces allocation
     /// The encoded data.
     pub encoded_data: Arc<FrontVec>,
+    resource_pack_data: Option<Arc<FrontVec>>,
 }
 
 impl EncodedPacket {
@@ -139,6 +140,7 @@ impl EncodedPacket {
 
         Ok(Self {
             encoded_data: Arc::new(packet_data),
+            resource_pack_data: None,
         })
     }
 
@@ -177,6 +179,7 @@ impl EncodedPacket {
 
             Ok(Self {
                 encoded_data: Arc::new(buf),
+                resource_pack_data: None,
             })
         } else {
             // Pushed before data:
@@ -191,6 +194,7 @@ impl EncodedPacket {
 
             Ok(Self {
                 encoded_data: Arc::new(packet_data),
+                resource_pack_data: None,
             })
         }
     }
@@ -205,12 +209,28 @@ impl EncodedPacket {
         compression: Option<CompressionInfo>,
         protocol: ConnectionProtocol,
     ) -> Result<Self, PacketError> {
-        let buf = Self::write_vec(packet, protocol)?;
-        Self::from_data(buf, compression)
+        use steel_registry::client_content::project_pack_models;
+        let (plain, has_pack_models) =
+            project_pack_models(false, || Self::write_vec(&packet, protocol));
+        let mut encoded = Self::from_data(plain?, compression)?;
+        if has_pack_models {
+            let (textured, _) = project_pack_models(true, || Self::write_vec(&packet, protocol));
+            encoded.resource_pack_data =
+                Some(Self::from_data(textured?, compression)?.encoded_data);
+        }
+        Ok(encoded)
+    }
+
+    /// Selects the representation negotiated for the recipient.
+    pub fn for_resource_pack(mut self, accepted: bool) -> Self {
+        if let Some(data) = self.resource_pack_data.take().filter(|_| accepted) {
+            self.encoded_data = data;
+        }
+        self
     }
 
     fn write_vec<P: ClientPacket>(
-        packet: P,
+        packet: &P,
         protocol: ConnectionProtocol,
     ) -> Result<FrontVec, PacketError> {
         let mut buf = FrontVec::new(6);

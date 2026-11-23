@@ -18,6 +18,7 @@
 # Config
 /config
 /extensions
+/resource-pack.zip
 /.tmp
 /.logs
 /debug

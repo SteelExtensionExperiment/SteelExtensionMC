@@ -8,7 +8,7 @@ use steel_utils::{BlockLocalAabb, BlockStateId, Direction};
 use crate::{
     Registry,
     blocks::{
-        Block,
+        Block, BlockRef,
         properties::{BlockStateProperties, Property},
         shapes::VoxelShape,
         state_data::BlockStateData,
@@ -92,6 +92,14 @@ impl HorizontalRotation {
                     translation: Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32),
                     scale: part.scale,
                     rotation: rotation * part.rotation,
+                    pack_transform: part.pack_transform.map(|part| {
+                        let p = self.point(part.translation.as_dvec3().to_array());
+                        super::BlockDisplayTransform {
+                            translation: Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32),
+                            scale: part.scale,
+                            rotation: rotation * part.rotation,
+                        }
+                    }),
                 }
             })
             .collect()
@@ -103,7 +111,8 @@ impl Registry {
         &mut self,
         block: &mut Block,
         displays: &[BlockItemDisplay],
-        preferred: Option<crate::blocks::BlockRef>,
+        geometry: Option<BlockRef>,
+        material: Option<BlockRef>,
         approximate: bool,
         placement: HorizontalPlacement,
     ) -> Result<ClientHorizontal, String> {
@@ -119,7 +128,7 @@ impl Registry {
             let rotation = HorizontalRotation(direction);
             let c = rotation.shape(block.get_collision_shape(0));
             let o = rotation.shape(block.get_outline_shape(0));
-            let carrier = self.select_client_state(c, o, preferred, approximate)?;
+            let carrier = self.select_client_state(c, o, geometry, material, approximate)?;
             collision.push(c);
             outline.push(o);
             support.push(rotation.shape(block.get_support_shape(0)));

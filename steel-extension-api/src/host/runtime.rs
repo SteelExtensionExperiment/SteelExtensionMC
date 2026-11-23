@@ -165,7 +165,11 @@ pub(crate) fn select_world(server: &CoreServer, id: PlayerId, name: &str) -> Res
         .worlds
         .get(&key(name)?)
         .ok_or("world is not loaded")?;
-    server.queue_player_world_selection(find_player(server, id)?, &world)
+    server.queue_player_world_selection(
+        find_player(server, id)?,
+        &world,
+        steel_core::server::WorldEntry::Usual,
+    )
 }
 pub(crate) fn teleport(server: &CoreServer, id: PlayerId, pos: Position) -> Result<(), String> {
     let player = find_player(server, id)?;

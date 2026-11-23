@@ -227,14 +227,9 @@ pub fn library(name: &str) -> PathBuf {
         root.join("../extension-example")
             .join(name.replace('_', "-"))
     };
-    crate_dir.join("target/debug").join(format!(
-        "{DLL_PREFIX}{}{DLL_SUFFIX}",
-        match name {
-            "creatures" => "steel_creatures_extension",
-            "magic" => "steel_magic_extension",
-            other => other,
-        }
-    ))
+    crate_dir
+        .join("target/debug")
+        .join(format!("{DLL_PREFIX}{name}{DLL_SUFFIX}"))
 }
 
 pub fn extension_data_root() -> PathBuf {
@@ -245,7 +240,7 @@ pub fn extension_data_root() -> PathBuf {
 
 pub async fn command(server: &Arc<Server>, player: &Arc<Player>, line: &str) -> Result<(), String> {
     server
-        .submit_command(CommandSender::Player(Arc::clone(player)), line.into())
+        .submit_command(CommandSender::Player(Arc::clone(player)), line.into(), None)
         .map_err(|_| "command queue full".to_owned())?;
     // Commands drain on the next ticks; give the queue a few at 200 TPS.
     sleep(Duration::from_millis(60)).await;
@@ -296,12 +291,18 @@ pub struct Loaded {
     pub order: Vec<&'static str>,
 }
 
-/// Loads `(library, config)` pairs built by their crates (see [`library`]) and initializes them.
+/// Loads named examples and their configurations, then initializes them.
 pub fn load_extensions(extensions: &[(&str, &str)], data_root: &Path) -> Result<Loaded, String> {
     let sources: Vec<host::ExtensionSource> = extensions
         .iter()
         .map(|(name, config)| host::ExtensionSource {
-            path: library(name),
+            path: match *name {
+                "creatures" | "magic" => PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../extension-example")
+                    .join(name)
+                    .join("target/test-extension.zip"),
+                _ => library(name),
+            },
             config: Some((*config).to_owned()),
         })
         .collect();

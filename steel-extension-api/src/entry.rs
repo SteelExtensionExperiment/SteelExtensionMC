@@ -16,7 +16,7 @@ type PreInitReport = extern "C" fn(
 ) -> ApiResult<()>;
 type InitReport = extern "C" fn(ExtensionContext<'static>) -> ApiResult<()>;
 
-/// Descriptor returned by the single `steel_extension_v3` bootstrap symbol.
+/// Descriptor returned by the single `steel_extension_v4` bootstrap symbol.
 ///
 /// Dependency lists are comma-separated extension names so the descriptor stays a `const`
 /// value; the host splits and validates them before running any extension code.
@@ -54,11 +54,11 @@ impl ExtensionDescriptor {
             depends: Str::new(depends),
             soft_depends: Str::new(soft_depends),
             pre_init: Self::entry::<PreInitReport>(
-                "steel:extension/pre_init/v3",
+                "steel:extension/pre_init/v4",
                 pre_init as *const (),
             ),
             initialize: Self::entry::<InitReport>(
-                "steel:extension/init/v3",
+                "steel:extension/init/v4",
                 initialize as *const (),
             ),
         }

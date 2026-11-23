@@ -4,6 +4,7 @@ mod c_keep_alive;
 mod c_pong_response;
 mod c_transfer;
 mod c_update_tags;
+mod resource_pack;
 mod s_client_information;
 mod s_custom_payload;
 mod s_keep_alive;
@@ -16,6 +17,9 @@ pub use c_pong_response::CPongResponse;
 pub use c_transfer::CTransfer;
 pub use c_update_tags::CUpdateTags;
 pub use c_update_tags::TagCollection;
+pub use resource_pack::{
+    CResourcePackPush, MAX_RESOURCE_PACK_URL_LENGTH, ResourcePackAction, SResourcePack,
+};
 pub use s_client_information::{ChatVisibility, HumanoidArm, ParticleStatus, SClientInformation};
 pub use s_custom_payload::SCustomPayload;
 pub use s_keep_alive::SKeepAlive;

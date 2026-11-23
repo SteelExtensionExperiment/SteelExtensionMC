@@ -10,6 +10,8 @@ authors.workspace = true
 steel-core.workspace = true
 steel-login.workspace = true
 steel-utils.workspace = true
+steel-protocol.workspace = true
+steel-registry.workspace = true
 steel-extension-api = { workspace = true, features = ["host"] }
 
 # Async runtime
@@ -20,6 +22,7 @@ futures.workspace = true
 # Serialization
 serde.workspace = true
 toml.workspace = true
+serde_json.workspace = true
 
 # Concurrency
 parking_lot = { workspace = true, features = [
@@ -40,9 +43,17 @@ chrono.workspace = true
 
 # Cryptography
 text_components.workspace = true
+sha1.workspace = true
+hex.workspace = true
+uuid.workspace = true
 
 # Networking
 reqwest.workspace = true
+hyper = { version = "1.12", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+tempfile = "3.27.0"
 
 # Memory
 mimalloc = { version = "0.1.52", optional = true }
@@ -53,9 +64,6 @@ strip-ansi-escapes = "0.2.1"
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-serde_json.workspace = true
 
 [features]
 default = ["mimalloc"]

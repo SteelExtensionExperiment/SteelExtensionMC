@@ -64,8 +64,9 @@ pub mod api {
             result.map(GameEventListener::from_host).into()
         }
         /// Calls the captured entity implementation directly.
-        pub fn apply_components_from_item(&self, item: ItemStackRef<'_>) {
-            self.host().apply_components_from_item(item.into_host());
+        pub fn apply_components_from_item_stack(&self, item: ItemStackRef<'_>) {
+            self.host()
+                .apply_components_from_item_stack(item.into_host());
         }
     }
 }

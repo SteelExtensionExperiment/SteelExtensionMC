@@ -7,7 +7,9 @@ use steel_core::player::PlayerConnection;
 use steel_core::player::connection::JavaConnection;
 use steel_core::player::{ClientInformation, Player, PlayerSession};
 use steel_protocol::packets::common::CCustomPayload;
-use steel_protocol::packets::common::{SClientInformation, SCustomPayload};
+use steel_protocol::packets::common::{
+    ResourcePackAction, SClientInformation, SCustomPayload, SResourcePack,
+};
 use steel_protocol::packets::config::CFinishConfiguration;
 use steel_protocol::packets::config::CSelectKnownPacks;
 use steel_protocol::packets::config::SSelectKnownPacks;
@@ -74,7 +76,10 @@ impl JavaTcpClient {
 
     /// Handles the select known packs packet during the configuration state.
     pub async fn handle_select_known_packs(&self, packet: SSelectKnownPacks) {
-        let sequence_result = self.pre_play_state.lock().select_known_packs();
+        let sequence_result = self
+            .pre_play_state
+            .lock()
+            .select_known_packs(self.resource_pack.is_some());
         if let Err(error) = sequence_result {
             self.reject_unexpected_packet(error).await;
             return;
@@ -90,13 +95,42 @@ impl JavaTcpClient {
         self.send_packet_now(&self.server.registry_cache.tags_packet)
             .await;
 
-        // Finish configuration with CFinishConfigurationPacket
+        if let Some(pack) = &self.resource_pack {
+            self.send_bare_packet_now(pack.as_ref().clone()).await;
+        } else {
+            self.send_bare_packet_now(CFinishConfiguration {}).await;
+        }
+    }
+
+    pub(crate) async fn handle_resource_pack_response(&self, response: SResourcePack) {
+        let Some(pack) = &self.resource_pack else {
+            return;
+        };
+        if response.id != pack.id || !response.action.is_terminal() {
+            return;
+        }
+        let loaded = response.action == ResourcePackAction::SuccessfullyLoaded;
+        let sequence = self.pre_play_state.lock().finish_resource_pack(loaded);
+        if let Err(error) = sequence {
+            self.reject_unexpected_packet(error).await;
+            return;
+        }
+        if pack.required && !loaded {
+            self.kick(TextComponent::translated(
+                translations::MULTIPLAYER_REQUIRED_TEXTURE_PROMPT_DISCONNECT.msg(),
+            ))
+            .await;
+            return;
+        }
         self.send_bare_packet_now(CFinishConfiguration {}).await;
     }
 
     /// Finishes the configuration process and transitions to the play state.
     pub(crate) async fn finish_configuration(&self) -> ConnectionAction {
-        let sequence_result = self.pre_play_state.lock().finish_configuration();
+        let (sequence_result, resource_pack_loaded) = {
+            let mut state = self.pre_play_state.lock();
+            (state.finish_configuration(), state.resource_pack_loaded())
+        };
         let gameprofile = match sequence_result {
             Ok(gameprofile) => gameprofile,
             Err(error) => return self.reject_unexpected_packet(error).await,
@@ -127,7 +161,9 @@ impl JavaTcpClient {
             Arc::clone(&self.network_writer),
             self.id,
             Arc::clone(&session),
-        );
+        )
+        .with_resource_pack(resource_pack_loaded)
+        .with_pending_keep_alive(self.config_keep_alive.take());
         let connection = Arc::new(PlayerConnection::Java(java_connection));
         let player = Arc::new(Player::new(
             gameprofile,

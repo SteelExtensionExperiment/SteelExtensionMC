@@ -32,6 +32,31 @@ fn selects_current_platform_and_extracts_only_its_library() -> Result<(), Box<dy
 }
 
 #[test]
+fn loads_resource_pack_assets_without_extracting_them() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("extension.zip");
+    let mut zip = ZipWriter::new(File::create(&path)?);
+    let files = [
+        (
+            "extension.toml",
+            manifest(&format!("{OS}-{ARCH}"), "library.bin"),
+        ),
+        ("library.bin", "native fixture".to_owned()),
+        ("assets/test/items/wand.json", "{}".to_owned()),
+    ];
+    for (name, data) in files {
+        zip.start_file(name, SimpleFileOptions::default())?;
+        zip.write_all(data.as_bytes())?;
+    }
+    zip.finish()?;
+
+    let prepared = prepare(&path)?;
+    assert_eq!(prepared.assets["assets/test/items/wand.json"], b"{}");
+    assert_eq!(fs::read_dir(prepared.directory.path())?.count(), 1);
+    Ok(())
+}
+
+#[test]
 fn rejects_unsupported_platforms_and_traversal_before_extraction() -> Result<(), Box<dyn Error>> {
     let (_source, path) = archive(&manifest("other-platform", "library.bin"), "library.bin")?;
     assert!(

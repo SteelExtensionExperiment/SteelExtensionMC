@@ -973,7 +973,7 @@ impl Player {
 
     fn queue_chat_command(
         self: &Arc<Self>,
-        server: &Server,
+        server: &Arc<Server>,
         command: String,
         mut signing_context: Option<CommandSigningContext>,
     ) {

@@ -55,6 +55,17 @@ chat_spam_threshold_seconds = 10
 # Vanilla command spam threshold window in seconds
 command_spam_threshold_seconds = 10
 
+[server.resource_pack]
+# disabled, optional, or required. Optional players can use fallback visuals.
+mode = "disabled"
+# The combined ZIP can be served by Steel or published by an external web server.
+output = "resource-pack.zip"
+# url = "https://play.example.com/resource-pack.zip"
+# Set bind to enable Steel's HTTP listener. Omit it for external hosting.
+# bind = "0.0.0.0:25567"
+# Optional additional ZIPs. Their assets are merged into the same pack.
+# include_zips = ["packs/server-art.zip"]
+
 # Extensions contribute independent HUD sections by default. The owner can replace
 # their combined layout using data from any extension. See
 # doc/extensions/examples/combined-hud.toml for a complete creature + mana layout.

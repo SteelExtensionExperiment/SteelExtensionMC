@@ -17,6 +17,7 @@ pub use horizontal::{ClientHorizontal, HorizontalPlacement};
 mod projection;
 pub use definition::{BlockDefinition, PlacingItem};
 mod registration;
+mod resource_pack;
 mod stack;
 
 pub use bed::{BedModel, BedRegistration, ClientBed};
@@ -24,6 +25,7 @@ pub use bed::{BedModel, BedRegistration, ClientBed};
 pub use registration::BlockItemRegistration;
 pub use registration::on_registration;
 pub(crate) use registration::run_registration_hooks;
+pub use resource_pack::{PackHeadFallback, ResourcePackAssets, project_pack_models};
 pub(crate) use stack::has_server_item;
 pub use stack::{client_stack, client_template, restore_client_stack};
 
@@ -32,8 +34,13 @@ use rustc_hash::FxHashMap;
 use steel_utils::BlockStateId;
 
 use crate::{
-    REGISTRY, RegistryEntry, blocks::BlockRef, entity_type::EntityTypeRef, fluid::FluidRef,
-    item_stack::ItemStack, items::ItemRef,
+    REGISTRY, RegistryEntry,
+    blocks::BlockRef,
+    data_components::vanilla_components::{ITEM_MODEL, PROFILE},
+    entity_type::EntityTypeRef,
+    fluid::FluidRef,
+    item_stack::ItemStack,
+    items::ItemRef,
 };
 
 /// A stationary display relative to the placed block's minimum corner.
@@ -43,6 +50,62 @@ pub struct BlockItemDisplay {
     pub translation: Vec3,
     pub scale: Vec3,
     pub rotation: Quat,
+    pub pack_transform: Option<BlockDisplayTransform>,
+}
+
+impl BlockItemDisplay {
+    /// Returns the display stack and placement for the recipient's pack status.
+    #[must_use]
+    pub fn for_client(&self, uses_pack: bool) -> (ItemStack, BlockDisplayTransform) {
+        let transform = BlockDisplayTransform {
+            translation: self.translation,
+            scale: self.scale,
+            rotation: self.rotation,
+        };
+        let packed = self.pack_transform.unwrap_or(transform);
+        if uses_pack {
+            return (self.item.clone(), packed);
+        }
+        let Some(fallback) = self
+            .item
+            .get(ITEM_MODEL)
+            .and_then(|model| REGISTRY.client_content.resource_pack().head_fallback(model))
+        else {
+            return (self.item.clone(), transform);
+        };
+        let mut item = ItemStack::new(fallback.item);
+        if let Some(profile) = &fallback.profile {
+            item.set(PROFILE, profile.clone());
+        }
+        // A head is half a block wide, with its origin centered on its top face.
+        let offset = Vec3::Y * (packed.scale.y * 0.5);
+        (
+            item,
+            BlockDisplayTransform {
+                translation: packed.translation + packed.rotation * offset,
+                scale: packed.scale * 2.0,
+                rotation: packed.rotation,
+            },
+        )
+    }
+}
+
+/// Alternate placement for the same display with the resource pack loaded.
+#[derive(Debug, Clone, Copy)]
+pub struct BlockDisplayTransform {
+    pub translation: Vec3,
+    pub scale: Vec3,
+    pub rotation: Quat,
+}
+
+impl BlockDisplayTransform {
+    pub(super) fn is_valid(self) -> bool {
+        self.translation.is_finite()
+            && self.scale.is_finite()
+            && self.scale.min_element() > 0.0
+            && self.rotation.is_finite()
+            && (self.rotation.length_squared() - 1.0).abs() <= 1.0e-4
+    }
 }
 
 /// A custom block's selected vanilla geometry, mining material, and attachments.
@@ -99,6 +162,7 @@ impl ClientBlock {
 
 #[derive(Default)]
 pub struct ClientContent {
+    resource_pack: ResourcePackAssets,
     items: FxHashMap<usize, ItemRef>,
     blocks: FxHashMap<usize, ClientBlock>,
     /// Keyed by both the source and the flowing fluid id.
@@ -118,6 +182,12 @@ pub struct ClientContent {
 }
 
 impl ClientContent {
+    /// Gets the resource pack assets contributed during content registration.
+    #[must_use]
+    pub const fn resource_pack(&self) -> &ResourcePackAssets {
+        &self.resource_pack
+    }
+
     pub(crate) const fn capture_vanilla(
         &mut self,
         items: usize,

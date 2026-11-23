@@ -7,9 +7,10 @@ use crate::{
     blocks::{
         BlockRef,
         behavior::OffsetType,
+        properties::{BlockStateProperties, Property},
         shapes::{BooleanOp, VoxelShape, join_is_not_empty, join_unoptimized_boxes},
     },
-    vanilla_blocks,
+    vanilla_block_entity_types, vanilla_blocks,
 };
 
 #[derive(Debug)]
@@ -21,6 +22,18 @@ pub(super) struct ProjectionCandidate {
 }
 
 impl Registry {
+    /// Whether the block can explicitly supply static custom block geometry.
+    #[must_use]
+    pub fn supports_block_geometry_source(&self, block: BlockRef) -> bool {
+        self.client_content.is_vanilla_block(block)
+            && !block.config.dynamic_shape
+            && !block.config.liquid
+            && !block.config.is_air
+            && block.config.offset_type == OffsetType::None
+            && (!self.block_entity_types.has_block_entity(block)
+                || vanilla_block_entity_types::SHELF.is_valid(block))
+    }
+
     fn projection_candidates(&mut self) {
         if !self.client_content.projections.is_empty() {
             return;
@@ -74,9 +87,18 @@ impl Registry {
         &mut self,
         collision: VoxelShape,
         outline: VoxelShape,
-        preferred: Option<BlockRef>,
+        geometry: Option<BlockRef>,
+        material: Option<BlockRef>,
         approximate: bool,
     ) -> Result<BlockStateId, String> {
+        if let Some(shelf) =
+            geometry.filter(|block| vanilla_block_entity_types::SHELF.is_valid(block))
+        {
+            return self
+                .project_shelf(shelf, collision, outline)
+                .ok_or_else(|| "no dry shelf state exactly matches the authored geometry".into());
+        }
+        let preferred = geometry.or(material);
         self.projection_candidates();
         let mut best: Option<(f64, u8, BlockStateId)> = None;
         for candidate in &self.client_content.projections {
@@ -118,5 +140,32 @@ impl Registry {
             }
         }
         best.map(|(_,_,state)| state).ok_or_else(|| "no compatible vanilla collision projection; opt into approximation for an unsupported shape".into())
+    }
+
+    fn project_shelf(
+        &self,
+        shelf: BlockRef,
+        collision: VoxelShape,
+        outline: VoxelShape,
+    ) -> Option<BlockStateId> {
+        let facing = &BlockStateProperties::HORIZONTAL_FACING;
+        let base = self.blocks.get_base_state_id(shelf);
+        // Use the shelf only when explicitly requested. The client can consume
+        // a click on its front face, so placement there relies on the server update.
+        facing.get_possible_values().iter().find_map(|direction| {
+            let state = self.blocks.state_id_from_block_defaulted_properties(
+                shelf,
+                [(facing.get_name(), direction.as_str())],
+            )?;
+            let offset = state.0 - base.0;
+            (shelf.fluid_state.value(offset).is_empty()
+                && !join_is_not_empty(
+                    collision,
+                    shelf.get_collision_shape(offset),
+                    BooleanOp::NotSame,
+                )
+                && !join_is_not_empty(outline, shelf.get_outline_shape(offset), BooleanOp::NotSame))
+            .then_some(state)
+        })
     }
 }

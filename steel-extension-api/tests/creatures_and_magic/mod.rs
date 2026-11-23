@@ -22,7 +22,7 @@ use steel_core::entity::{Entity, RemovalReason};
 use steel_core::{entity::SharedEntity, world::World};
 use steel_core::{
     entity::custom_data::DataPath,
-    entity::{ENTITIES, LivingEntity, damage::DamageSource, next_entity_id},
+    entity::{ENTITIES, LivingEntity, damage::DamageSource},
     player::Player,
     server::Server,
 };
@@ -95,7 +95,7 @@ async fn spell(server: &Server, player: &Arc<Player>, index: i16) -> Result<(), 
 }
 
 #[test]
-#[ignore = "requires debug builds of extension-example/creatures and extension-example/magic"]
+#[ignore = "requires the Creatures and Magic test ZIPs described in their READMEs"]
 fn independent_examples_capture_cast_and_protect_on_a_vanilla_connection() -> Result<(), String> {
     let root = tempfile::tempdir().map_err(|e| e.to_string())?;
     let loaded = common::load_extensions(

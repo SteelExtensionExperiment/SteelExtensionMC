@@ -28,7 +28,6 @@ async fn prepare(
         let sheep = ENTITIES
             .create(
                 &vanilla_entities::SHEEP,
-                next_entity_id(),
                 DVec3::new(10.5, 65.0, 8.5),
                 Arc::downgrade(&level),
             )
@@ -90,7 +89,6 @@ async fn launch(
     let target = ENTITIES
         .create(
             &vanilla_entities::SHEEP,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, if entity_click { 8.0 } else { 10.0 }),
             Arc::downgrade(world),
         )

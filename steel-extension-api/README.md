@@ -74,15 +74,14 @@ and models. The furniture chair rotates its seat offset with that facing.
 
 Models support unit XYZW rotations and independent item-model keys. The default
 [furniture example](../extension-example/furniture/README.md) rotates existing
-vanilla slab models into vertical half blocks for all slab materials. Its optional
-generated resource pack supplies dedicated models and inventory icons. Resource
-packs affect visuals, not client collision.
+vanilla slab models into vertical half blocks for all slab materials. Steel's
+optional resource pack also rotates those models in inventory.
 
 `register_bed(BedDefinition)` registers an ordinary bed state family with sleeping
 and respawn behavior. `Player::sit(anchor, offset)` supplies temporary seats.
 See [Custom items and blocks](../doc/extensions/custom-content.md) for the complete
 contract and the [lucky-block example](../extension-example/lucky-block/README.md)
-for yellow head models, random rewards, and traps.
+for a textured block with random rewards and traps.
 
 ## Ordered actions and filters
 
@@ -183,7 +182,7 @@ even when the physical layout remains compatible.
 
 Depend on `steel-extension-api` without enabling `host`, build a `cdylib`, and declare
 both lifecycle entrypoints with `export_extension!` (see [Lifecycle](#lifecycle)). The
-macro exports one `steel_extension_v3` bootstrap symbol containing the extension's name,
+macro exports one `steel_extension_v4` bootstrap symbol containing the extension's name,
 version, dependencies and checked entrypoint signatures. Rebuild extension libraries when
 moving to this lifecycle contract; older libraries are skipped with a rebuild message.
 
@@ -238,6 +237,46 @@ The registration events replace complete block behaviors and install terrain-onl
 generators. `Hooks` subscribes to world ticks. World callbacks run once per normal
 world tick on the existing world thread; frozen ticks do not invoke them. World
 reads reject unavailable chunks, and writes use normal gameplay updates.
+
+## Extension textures
+
+Register a textured cube during a content callback. Steel uses the block's key
+for the item model and display, and chooses the appearance per client.
+
+```rust,ignore
+const BLOCK: &str = "example:amber";
+registry.register_textured_cube(
+    BlockItemDefinition {
+        block: BlockDefinition::new(BLOCK)
+            .properties(BlockProperties::of_full_copy("minecraft:honeycomb_block")),
+        item: ItemDefinition {
+            key: BLOCK.into(),
+            name: "Amber".into(),
+            appearance: ItemAppearance::new("minecraft:honeycomb_block"),
+            max_stack_size: 64,
+        },
+        drop_self: true,
+    },
+    include_bytes!("amber.png").as_slice().into(),
+    TextureFallback::Vanilla,
+).match_owned(|_| Ok(()), Err)?;
+```
+
+Use `TextureFallback::vanilla_head(VanillaHead::Creeper)` to choose a head
+already available on the vanilla client. It appears in inventory and as one
+fitted head display for players without the pack. The other options are the
+default player head, skeleton skull, wither skeleton skull, and zombie head.
+
+`TextureFallback::Head { skin }` also accepts an existing Minecraft skin URL
+or hash for a custom player head. The same head is used in inventory and for
+the placed cube.
+
+Use `register_item_texture` for a flat item icon. For custom models, call
+`add_resource_asset` or put vanilla-layout `assets/<namespace>/...` files in the
+crate directory and package it with `package-extension.py`. Reference the key
+under `assets/<namespace>/items/` using `ItemAppearance::with_model`.
+Extension assets use custom namespaces, and conflicting files at the same path
+fail registration.
 
 ## Replace block behavior and choose delegation
 

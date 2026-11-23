@@ -419,10 +419,9 @@ fn build_version_constants(manifest_dir: &str) -> TokenStream {
         .unwrap_or_else(|e| panic!("Failed to read {}: {e}", version_json_path.display()));
     let info: VersionInfo = serde_json::from_str(&version_json)
         .unwrap_or_else(|e| panic!("Failed to parse {}: {e}", version_json_path.display()));
-    let resource_pack_version = format_pack_version(
-        info.pack_version.resource_major,
-        info.pack_version.resource_minor,
-    );
+    let resource_major = info.pack_version.resource_major;
+    let resource_minor = info.pack_version.resource_minor;
+    let resource_pack_version = format_pack_version(resource_major, resource_minor);
     let data_pack_version =
         format_pack_version(info.pack_version.data_major, info.pack_version.data_minor);
     let build_time = DateTime::parse_from_rfc3339(&info.build_time)
@@ -455,6 +454,8 @@ fn build_version_constants(manifest_dir: &str) -> TokenStream {
         pub const BUILD_TIME: &str = #build_time;
         /// Vanilla `WorldVersion.packVersion(PackType.CLIENT_RESOURCES)`, formatted like `PackFormat::toString`.
         pub const RESOURCE_PACK_VERSION: &str = #resource_pack_version;
+        /// Vanilla client resource pack format, as major and minor versions.
+        pub const RESOURCE_PACK_FORMAT: [i32; 2] = [#resource_major, #resource_minor];
         /// Vanilla `WorldVersion.packVersion(PackType.SERVER_DATA)`, formatted like `PackFormat::toString`.
         pub const DATA_PACK_VERSION: &str = #data_pack_version;
         /// Vanilla `WorldVersion.stable`.

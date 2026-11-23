@@ -135,6 +135,7 @@ fn malformed_shapes_transforms_and_properties_fail_before_registration() {
             translation: [0.5; 3],
             scale: [1.0; 3],
             rotation: [0.0; 4],
+            pack_transform: None.into(),
         }]),
     ];
     let mut registry = Registry::new_vanilla();

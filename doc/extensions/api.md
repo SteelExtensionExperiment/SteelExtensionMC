@@ -177,7 +177,7 @@ fixed one-item self-drops. Straw bed templates are rejected.
 See [Custom items and blocks](custom-content.md) for definition fields,
 coordinate conventions, mining, fixed drops, and persistence. The standalone
 [lucky-block example](../../extension-example/lucky-block/README.md) uses oak
-planks and a yellow question-mark head model with no required resource pack.
+planks and a yellow question-mark model supplied by Steel's resource pack.
 The [furniture example](../../extension-example/furniture/README.md) adds a usable
 chair, vertical half slabs, and a bed with sleeping and respawn support.
 

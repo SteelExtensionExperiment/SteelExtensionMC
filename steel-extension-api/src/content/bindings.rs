@@ -7,10 +7,10 @@ pub mod api {
         ApiResult, BlockState,
         content::{
             BedDefinition, BiomeDefinition, BlockDefinition, BlockItemDefinition, EntityDefinition,
-            FluidDefinition, ItemDefinition, RegisteredFluid, SlabMaterial,
+            FluidDefinition, ItemDefinition, RegisteredFluid, SlabMaterial, TextureFallback,
         },
     };
-    use stabby::{string::String as ApiString, vec::Vec as ApiVec};
+    use stabby::{slice::Slice, str::Str, string::String as ApiString, vec::Vec as ApiVec};
 
     /// Exclusive access before the real item and block registries freeze.
     #[opaque]
@@ -34,6 +34,80 @@ pub mod api {
         #[must_use]
         pub fn config(&self) -> ApiString {
             self.host().config.into()
+        }
+
+        /// Adds a namespaced asset under `assets/` to the combined server pack.
+        pub fn add_resource_asset(&mut self, path: Str<'_>, bytes: Slice<'_, u8>) -> ApiResult<()> {
+            content::resource_pack::add_asset(
+                self.host_mut().registry,
+                path.as_str(),
+                bytes.as_slice(),
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
+
+        /// Adds a PNG and creates a flat item model with the supplied namespaced key.
+        pub fn register_item_texture(
+            &mut self,
+            model: Str<'_>,
+            png: Slice<'_, u8>,
+        ) -> ApiResult<()> {
+            content::resource_pack::register_texture(
+                self.host_mut().registry,
+                model.as_str(),
+                png.as_slice(),
+                false,
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
+
+        /// Adds a PNG and creates a cube model for a placed block or its item.
+        pub fn register_block_texture(
+            &mut self,
+            model: Str<'_>,
+            png: Slice<'_, u8>,
+        ) -> ApiResult<()> {
+            content::resource_pack::register_texture(
+                self.host_mut().registry,
+                model.as_str(),
+                png.as_slice(),
+                true,
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
+
+        /// Registers a block, its placing item, and a shared cube model from one PNG.
+        /// Uses the block's key for the model and applies the fallback per client.
+        pub fn register_textured_cube(
+            &mut self,
+            definition: BlockItemDefinition,
+            png: Slice<'_, u8>,
+            fallback: TextureFallback,
+        ) -> ApiResult<BlockState> {
+            content::resource_pack::register_textured_cube(
+                self.host_mut().registry,
+                definition,
+                png.as_slice(),
+                fallback,
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
+
+        /// Uses a Minecraft head as the no-pack fallback for a contributed item model.
+        /// Pass a built-in cubical head key or a Minecraft texture URL or hash.
+        /// Use only with centered cube geometry when the model is used in block displays.
+        pub fn register_head_fallback(&mut self, model: Str<'_>, skin: Str<'_>) -> ApiResult<()> {
+            content::resource_pack::register_head_fallback(
+                self.host_mut().registry,
+                model.as_str(),
+                skin.as_str(),
+            )
+            .map_err(ApiString::from)
+            .into()
         }
 
         /// Registers a non-placing item with default item behavior.

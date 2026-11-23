@@ -236,7 +236,7 @@ impl Fixture {
     }
 }
 
-fn packet_payload(packet: &EncodedPacket, id: i32) -> Option<Cursor<&[u8]>> {
+pub fn packet_payload(packet: &EncodedPacket, id: i32) -> Option<Cursor<&[u8]>> {
     let mut cursor = Cursor::new(packet.encoded_data.as_slice());
     let _length = VarInt::read(&mut cursor).ok()?;
     (VarInt::read(&mut cursor).ok()?.0 == id).then_some(cursor)

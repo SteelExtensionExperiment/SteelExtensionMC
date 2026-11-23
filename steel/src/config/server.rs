@@ -35,6 +35,9 @@ pub struct ServerConfig {
     /// Owner-controlled extension HUD layout and data bindings.
     #[serde(default)]
     pub hud: steel_core::player::hud::HudPolicy,
+    /// Combined extension resource pack delivery.
+    #[serde(default)]
+    pub resource_pack: super::ResourcePackConfig,
     /// The port the server will listen on.
     pub server_port: u16,
     /// The maximum number of players that can be on the server at once.
@@ -143,6 +146,7 @@ pub struct ThreadConfig {
 /// # Errors
 /// This function will return an error if the configuration is invalid.
 pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
+    config.resource_pack.validate()?;
     validate_login_security(config.online_mode, config.encryption)?;
     if !config.allow_extended_view_distance && !(1..=32).contains(&config.view_distance) {
         return Err("View distance must in range 1..32");

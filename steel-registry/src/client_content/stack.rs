@@ -5,6 +5,7 @@ use std::{
 };
 
 use simdnbt::owned::NbtCompound;
+use steel_utils::Identifier;
 
 use crate::{
     ItemStackTemplate, REGISTRY,
@@ -14,7 +15,7 @@ use crate::{
             BundleContents, ChargedProjectiles, CustomData, ItemContainerContents, PotDecorations,
             SulfurCubeContent, UseRemainder,
         },
-        vanilla_components::CUSTOM_DATA,
+        vanilla_components::{CUSTOM_DATA, ITEM_MODEL, PROFILE},
     },
     item_stack::ItemStack,
     items::ItemRef,
@@ -59,7 +60,7 @@ impl Drop for DepthGuard {
 /// Projects identity, default components, and recursive item templates together.
 /// Vanilla stacks without custom descendants are borrowed without modification.
 pub fn client_stack(stack: &ItemStack) -> Result<Cow<'_, ItemStack>> {
-    if stack.is_empty() || !REGISTRY.client_content.has_items() {
+    if stack.is_empty() || !has_custom_items_or_models() {
         return Ok(Cow::Borrowed(stack));
     }
     let _depth = DepthGuard::enter()?;
@@ -75,7 +76,7 @@ pub fn client_stack(stack: &ItemStack) -> Result<Cow<'_, ItemStack>> {
 
 /// The template codec also occurs inside recipes, particles, bundles, and containers.
 pub fn client_template(template: &ItemStackTemplate) -> Result<Cow<'_, ItemStackTemplate>> {
-    if !REGISTRY.client_content.has_items() {
+    if !has_custom_items_or_models() {
         return Ok(Cow::Borrowed(template));
     }
     let _depth = DepthGuard::enter()?;
@@ -89,12 +90,25 @@ pub fn client_template(template: &ItemStackTemplate) -> Result<Cow<'_, ItemStack
     )?))
 }
 
+fn has_custom_items_or_models() -> bool {
+    let content = &REGISTRY.client_content;
+    content.has_items() || content.resource_pack().has_item_models()
+}
+
 fn project_parts(
     item: ItemRef,
     patch: &DataComponentPatch,
 ) -> Result<Option<(ItemRef, DataComponentPatch)>> {
-    let fallback = REGISTRY.client_content.item(item);
-    let mut projected = if REGISTRY.client_content.is_custom_item(item) {
+    let content = &REGISTRY.client_content;
+    let pack = content.resource_pack();
+    let model = effective_item_model(item, patch).filter(|model| pack.has_item_model(model));
+    let omit_pack_model = model.is_some() && !super::resource_pack::use_pack_model();
+    let custom = content.is_custom_item(item);
+    let head = model
+        .filter(|_| custom && omit_pack_model)
+        .and_then(|model| pack.head_fallback(model));
+    let fallback = head.map_or_else(|| content.item(item), |head| head.item);
+    let mut projected = if custom {
         let mut projected = patch.rebased(&item.components, &fallback.components);
         // The full server patch is retained for creative copies, including custom
         // data overwritten by this transport envelope. Count belongs to the outer stack.
@@ -113,6 +127,18 @@ fn project_parts(
     } else {
         None
     };
+
+    if omit_pack_model {
+        let projected = projected.get_or_insert_with(|| patch.clone());
+        projected.clear(ITEM_MODEL);
+        if let Some(head) = head {
+            if let Some(profile) = &head.profile {
+                projected.set(PROFILE, profile.clone());
+            } else {
+                projected.clear(PROFILE);
+            }
+        }
+    }
 
     // Process effective components, including recursive values in item defaults.
     // The envelope above is deliberately opaque; its contents remain server data.
@@ -141,6 +167,20 @@ fn project_parts(
         }
     }
     Ok(projected.map(|patch| (fallback, patch)))
+}
+
+fn effective_item_model<'a>(
+    item: ItemRef,
+    patch: &'a DataComponentPatch,
+) -> Option<&'a Identifier> {
+    match patch.get_entry(ITEM_MODEL.key()) {
+        Some(ComponentPatchEntry::Set(value)) => value.downcast_ref(),
+        Some(ComponentPatchEntry::Removed) => None,
+        None => item
+            .components
+            .get_raw(ITEM_MODEL.key())
+            .and_then(ComponentData::downcast_ref),
+    }
 }
 
 fn project_component(value: &ComponentData) -> Result<Option<ComponentData>> {
@@ -247,9 +287,12 @@ pub fn restore_client_stack(stack: ItemStack) -> Result<ItemStack> {
         .map_err(|error| Error::other(format!("invalid server item envelope: {error}")))?;
     let mut restored = ItemStack::from_borrowed_compound(&(&borrowed).into())
         .ok_or_else(|| Error::other("unknown or invalid server item in envelope"))?;
-    if !REGISTRY.client_content.is_custom_item(restored.item())
-        || REGISTRY.client_content.item(restored.item()) != stack.item()
-    {
+    let content = &REGISTRY.client_content;
+    let item = restored.item();
+    let matches_head = effective_item_model(item, restored.patch())
+        .and_then(|model| content.resource_pack().head_fallback(model))
+        .is_some_and(|head| stack.is(head.item) && stack.get(PROFILE) == head.profile.as_ref());
+    if !content.is_custom_item(item) || (content.item(item) != stack.item() && !matches_head) {
         return Err(Error::other(
             "server item envelope does not match its vanilla representation",
         ));

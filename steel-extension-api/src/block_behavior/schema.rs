@@ -432,7 +432,7 @@ contract::block_behavior_contract! {
     #[must_use]
     fn get_analog_output_signal(
         state: core_types::BlockStateId => BlockState,
-        world: &dyn core_types::LevelReader => LevelReader<'_>,
+        world: &core_types::World => WorldRef<'_>,
         pos: core_types::BlockPos => BlockPos,
         direction: core_types::Direction => Direction,
     ) -> i32 => i32;

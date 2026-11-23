@@ -28,7 +28,6 @@ pub(super) async fn deploy_and_recall(
     let target = ENTITIES
         .create(
             &vanilla_entities::COW,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, 9.5),
             Arc::downgrade(world),
         )
@@ -181,7 +180,6 @@ pub(super) async fn capture(running: &common::Running, world: &Arc<World>) -> Re
     let cow = ENTITIES
         .create(
             &vanilla_entities::COW,
-            next_entity_id(),
             DVec3::new(8.5, 65.0, 8.0),
             Arc::downgrade(&world),
         )
@@ -274,7 +272,6 @@ pub(super) async fn attack_spells(
         let target = ENTITIES
             .create(
                 &vanilla_entities::COW,
-                next_entity_id(),
                 DVec3::new(8.5, 65.0, 9.5),
                 Arc::downgrade(&world),
             )

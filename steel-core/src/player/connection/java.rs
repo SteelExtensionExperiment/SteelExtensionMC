@@ -404,6 +404,7 @@ pub struct JavaConnection {
     id: u64,
 
     session: Arc<PlayerSession>,
+    uses_resource_pack: bool,
     keep_alive_tracker: SyncMutex<KeepAliveTracker>,
     latency: SyncMutex<u32>,
 }
@@ -425,6 +426,7 @@ impl JavaConnection {
             network_writer,
             id,
             session,
+            uses_resource_pack: false,
             keep_alive_tracker: SyncMutex::new(KeepAliveTracker {
                 alive_time: 0,
                 alive_pending: false,
@@ -432,6 +434,29 @@ impl JavaConnection {
             }),
             latency: SyncMutex::new(0),
         }
+    }
+
+    /// Sets the visual representation selected during configuration.
+    #[must_use]
+    pub const fn with_resource_pack(mut self, accepted: bool) -> Self {
+        self.uses_resource_pack = accepted;
+        self
+    }
+
+    /// Carries an outstanding configuration keep-alive over the play transition.
+    #[must_use]
+    pub fn with_pending_keep_alive(self, challenge: Option<i64>) -> Self {
+        if let Some(challenge) = challenge {
+            let mut tracker = self.keep_alive_tracker.lock();
+            tracker.alive_pending = true;
+            tracker.alive_id = challenge.cast_unsigned();
+            tracker.alive_time = tracker.alive_id;
+        }
+        self
+    }
+
+    pub(super) const fn uses_resource_pack(&self) -> bool {
+        self.uses_resource_pack
     }
 
     async fn write_packet_now(&self, packet: &EncodedPacket) -> Result<(), PacketError> {
@@ -556,13 +581,7 @@ impl JavaConnection {
     pub fn send_packet<P: ClientPacket>(&self, packet: P) {
         let packet = EncodedPacket::from_bare(packet, self.compression, ConnectionProtocol::Play)
             .expect("Failed to encode packet");
-        if self
-            .outgoing_packets
-            .send(OutboundPacket::Packet(packet))
-            .is_err()
-        {
-            self.close();
-        }
+        self.send_encoded_packet(packet);
     }
 
     /// Sends an encoded packet to the client.
@@ -572,7 +591,9 @@ impl JavaConnection {
     pub fn send_encoded_packet(&self, packet: EncodedPacket) {
         if self
             .outgoing_packets
-            .send(OutboundPacket::Packet(packet))
+            .send(OutboundPacket::Packet(
+                packet.for_resource_pack(self.uses_resource_pack),
+            ))
             .is_err()
         {
             self.close();

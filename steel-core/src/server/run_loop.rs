@@ -314,13 +314,10 @@ impl Server {
             let tick_elapsed = tick_start.elapsed();
             let tab_list_tick_stats =
                 self.record_tick_and_capture_tab_stats(tick_count, tick_elapsed.as_nanos() as u64);
-            if let Some(completed) = self.perf.record_tick(
-                tick_elapsed,
-                self.worlds
-                    .values()
-                    .map(|world| &world.key)
-                    .zip(world_timings),
-            ) {
+            if let Some(completed) = self
+                .perf
+                .record_tick(tick_elapsed, world_tick_workers.keys().zip(world_timings))
+            {
                 completed.finish(&self);
             }
 

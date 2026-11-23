@@ -57,6 +57,14 @@ def package(args):
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("extension.toml", archive_manifest)
         archive.write(libraries[0], member)
+        for asset in sorted((crate / "assets").rglob("*")):
+            if asset.is_symlink():
+                raise ValueError(f"resource pack assets cannot be symbolic links: {asset}")
+            if asset.is_file():
+                relative = asset.relative_to(crate)
+                if len(relative.parts) < 3:
+                    raise ValueError(f"resource pack asset needs a namespace directory: {relative}")
+                archive.write(asset, relative.as_posix())
     print(output)
 
 

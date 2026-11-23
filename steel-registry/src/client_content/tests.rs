@@ -59,7 +59,6 @@ fn selected_geometry_matches_every_extracted_shape_channel() -> Result<(), Strin
             Identifier::new("geometry_test", name),
             carrier,
             &vanilla_blocks::OAK_PLANKS,
-            None,
             Vec::new(),
         )?;
         let custom = registry.blocks.get_default_state_id(block);
@@ -149,13 +148,7 @@ fn unsupported_state_geometry_leaves_no_registration() -> Result<(), String> {
         let count = registry.blocks.next_state_id;
         assert!(
             registry
-                .register_client_block(
-                    key.clone(),
-                    state,
-                    &vanilla_blocks::OAK_PLANKS,
-                    None,
-                    Vec::new()
-                )
+                .register_client_block(key.clone(), state, &vanilla_blocks::OAK_PLANKS, Vec::new())
                 .is_err()
         );
         assert!(registry.blocks.by_key(&key).is_none());
@@ -180,11 +173,7 @@ fn rejected_item_or_carrier_does_not_leave_a_partial_block_registration() {
             .register_client_item(item("token"), &vanilla_items::PAPER)
             .is_ok()
     );
-    let counts = (
-        registry.blocks.len(),
-        registry.items.len(),
-        registry.loot_tables.len(),
-    );
+    let counts = (registry.blocks.len(), registry.items.len());
     for (path, carrier, item) in [
         ("duplicate", &vanilla_blocks::OAK_PLANKS, item("token")),
         ("barrier", &vanilla_blocks::BARRIER, item("barrier_item")),
@@ -205,13 +194,6 @@ fn rejected_item_or_carrier_does_not_leave_a_partial_block_registration() {
                 .is_err()
         );
         assert!(registry.blocks.by_key(&key).is_none());
-        assert_eq!(
-            (
-                registry.blocks.len(),
-                registry.items.len(),
-                registry.loot_tables.len()
-            ),
-            counts
-        );
+        assert_eq!((registry.blocks.len(), registry.items.len()), counts);
     }
 }

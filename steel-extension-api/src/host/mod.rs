@@ -197,6 +197,7 @@ pub struct LoadReport {
 struct OpenedExtension<'a> {
     source: &'a ExtensionSource,
     descriptor: &'static ExtensionDescriptor,
+    assets: std::collections::BTreeMap<String, Vec<u8>>,
 }
 
 /// ZIP packages and native libraries directly inside `directory`, sorted by file name.
@@ -223,7 +224,7 @@ pub fn discover(directory: &Path) -> Result<Vec<PathBuf>, String> {
 /// Opens a package or library and validates its descriptor without running extension code.
 ///
 /// # Safety
-/// The library must be trusted native code honoring the `steel_extension_v3` contract.
+/// The library must be trusted native code honoring the `steel_extension_v4` contract.
 unsafe fn open(source: &ExtensionSource) -> Result<OpenedExtension<'_>, String> {
     let path = &source.path;
     if path.extension().is_some_and(|ext| ext == "zip") {
@@ -242,11 +243,19 @@ unsafe fn open(source: &ExtensionSource) -> Result<OpenedExtension<'_>, String> 
                 package.name
             ));
         }
-        return Ok(OpenedExtension { source, descriptor });
+        return Ok(OpenedExtension {
+            source,
+            descriptor,
+            assets: package.assets,
+        });
     }
     // SAFETY: the caller trusts this explicitly selected native library.
     let descriptor = unsafe { open_library(path, path) }?;
-    Ok(OpenedExtension { source, descriptor })
+    Ok(OpenedExtension {
+        source,
+        descriptor,
+        assets: Default::default(),
+    })
 }
 
 /// Pins a native library and returns its checked descriptor; `origin` names it in errors.
@@ -263,13 +272,14 @@ unsafe fn open_library(
     // Native callbacks can be retained by global host registries or destructors;
     // process-lifetime pinning applies even when initialization subsequently fails.
     let library = Box::leak(Box::new(library));
-    // SAFETY: version three fixes this getter's signature and descriptor layout;
+    // SAFETY: version four fixes this getter's signature and descriptor layout;
     // the caller trusts the library to honor it. The pinned library cannot unload.
     let getter = unsafe {
-        library.get::<extern "C" fn() -> &'static ExtensionDescriptor>(b"steel_extension_v3")
+        library.get::<extern "C" fn() -> &'static ExtensionDescriptor>(b"steel_extension_v4")
     };
     let Ok(getter) = getter else {
         let older = [
+            b"steel_extension_v3".as_slice(),
             b"steel_extension_v2".as_slice(),
             b"steel_plugin_v4".as_slice(),
             b"steel_plugin_v3".as_slice(),
@@ -319,7 +329,7 @@ fn read_config(data_root: &Path, name: &str) -> Result<String, String> {
 }
 
 fn pre_initialize(
-    opened: &OpenedExtension<'_>,
+    opened: &mut OpenedExtension<'_>,
     config: &str,
     hooks: &mut ExtensionHooks,
 ) -> Result<LoadedExtension, String> {
@@ -335,6 +345,19 @@ fn pre_initialize(
         descriptor.version.as_str(),
         config,
     ));
+    if !opened.assets.is_empty() {
+        let assets = std::mem::take(&mut opened.assets);
+        state.begin_registration();
+        let extension = Arc::clone(&state);
+        steel_registry::client_content::on_registration(move |registry| {
+            extension.run_registration("resource pack", || {
+                registry
+                    .register_pack_assets(assets)
+                    .map_err(ApiString::from)
+                    .into()
+            });
+        })?;
+    }
     let result: Result<(), ApiString> = {
         let mut hook_registration = HookRegistration {
             hooks,
@@ -374,7 +397,7 @@ fn pre_initialize(
 /// diagnostic instead of stopping startup; duplicate names within one call are skipped too.
 ///
 /// # Safety
-/// Every library must be trusted native code honoring the fixed `steel_extension_v3`
+/// Every library must be trusted native code honoring the fixed `steel_extension_v4`
 /// descriptor contract. ABI reports cannot validate machine code.
 pub unsafe fn load_all(
     sources: &[ExtensionSource],
@@ -410,7 +433,7 @@ pub unsafe fn load_all(
     }
     let mut extensions = Vec::with_capacity(resolution.order.len());
     for index in resolution.order {
-        let extension = &opened[index];
+        let extension = &mut opened[index];
         let config = match &extension.source.config {
             Some(config) => config.clone(),
             None => read_config(data_root, extension.descriptor.name.as_str())?,

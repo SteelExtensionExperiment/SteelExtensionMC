@@ -39,7 +39,7 @@ pub trait BlockEntityBehavior: Send + Sync {
         StableOption::None()
     }
     /// Apply components from item.
-    extern "C" fn apply_components_from_item(&self, _item: ItemStackRef<'_>) {}
+    extern "C" fn apply_components_from_item_stack(&self, _item: ItemStackRef<'_>) {}
 }
 /// Owning, checked block entity implementation.
 pub type DynBlockEntityBehavior =

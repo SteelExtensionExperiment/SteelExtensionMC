@@ -12,14 +12,9 @@ mod mining;
 #[path = "lucky_block/wire.rs"]
 mod wire;
 
-use std::{
-    env::consts::{DLL_PREFIX, DLL_SUFFIX},
-    error::Error,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{error::Error, path::PathBuf, sync::Arc};
 
-use glam::DVec3;
+use glam::{DVec3, Vec3};
 use rustc_hash::FxHashMap;
 use steel_core::{
     bootstrap::init_globals,
@@ -30,7 +25,8 @@ use steel_extension_api::host;
 use steel_registry::{
     REGISTRY, RegistryExt,
     blocks::{BlockRef, properties::Direction},
-    client_content::{client_block_state, on_registration},
+    client_content::{client_block_state, client_stack, on_registration},
+    data_components::vanilla_components::{ITEM_MODEL, PROFILE},
     item_stack::ItemStack,
     items::ItemRef,
     items::item::BlockHitResult,
@@ -43,13 +39,10 @@ use steel_utils::{
 };
 
 #[test]
-#[ignore = "requires cargo build --manifest-path extension-example/lucky-block/Cargo.toml"]
+#[ignore = "requires the Lucky Block test ZIP described in its README"]
 fn lucky_block_places_mines_projects_and_persists() -> Result<(), Box<dyn Error>> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../extension-example/lucky-block/target/debug")
-        .join(format!(
-            "{DLL_PREFIX}steel_lucky_block_extension{DLL_SUFFIX}"
-        ));
+        .join("../extension-example/lucky-block/target/test-extension.zip");
     let mut hooks = ExtensionHooks::default();
     on_registration(|registry| {
         if let Err(error) = geometry::register(registry) {
@@ -64,17 +57,21 @@ fn lucky_block_places_mines_projects_and_persists() -> Result<(), Box<dyn Error>
                         .blocks
                         .get_default_state_id(&vanilla_blocks::OAK_PLANKS),
                     &vanilla_blocks::OAK_PLANKS,
-                    None,
                     Vec::new(),
                 )
                 .is_ok()
         );
     })?;
-    // SAFETY: this trusted example exports the checked v2 native contract;
+    // SAFETY: this trusted example exports the checked v4 native contract;
     // the loader pins the library for the lifetime of its registration callback.
     let extension = unsafe { host::load(&path, "seed = 42", &mut hooks) }?;
     assert!(!REGISTRY.is_initialized());
     init_globals();
+    let assets: std::collections::BTreeMap<_, _> =
+        REGISTRY.client_content.resource_pack().files().collect();
+    assert!(assets.contains_key("assets/lucky/textures/block/lucky_block.png"));
+    assert!(assets.contains_key("assets/lucky/models/block/lucky_block.json"));
+    assert!(assets.contains_key("assets/lucky/items/lucky_block.json"));
     let data_root = tempfile::tempdir()?;
     let _initialized = host::initialize_all(vec![extension], data_root.path(), &mut hooks)?;
     let key = Identifier::new_static("lucky", "lucky_block");
@@ -195,11 +192,41 @@ fn check_gameplay(block: BlockRef, item: ItemRef) -> Result<(), Box<dyn Error>> 
     Ok(())
 }
 
+fn check_display_geometry(state: BlockStateId) -> Result<(), Box<dyn Error>> {
+    let block = REGISTRY
+        .blocks
+        .by_state_id(state)
+        .ok_or("missing lucky block")?;
+    let model = REGISTRY
+        .client_content
+        .block(block)
+        .ok_or("missing block projection")?;
+    let [display] = model.displays_for(state) else {
+        return Err("expected one display per lucky block".into());
+    };
+    let (cube, cube_transform) = display.for_client(true);
+    assert!(cube.is(&vanilla_items::OAK_PLANKS));
+    assert_eq!(cube.get(ITEM_MODEL), Some(&block.key));
+    assert!(cube.get(PROFILE).is_none());
+    let (head, transform) = display.for_client(false);
+    let item = ItemStack::new(REGISTRY.items.by_block(block));
+    let inventory = client_stack(&item)?;
+    let preview = inventory.get(PROFILE).ok_or("missing inventory preview")?;
+    assert!(head.is(&vanilla_items::PLAYER_HEAD));
+    assert_eq!(head.get(PROFILE), Some(preview));
+    let half_extent = transform.scale * 0.25;
+    let center = transform.translation - transform.rotation * (Vec3::Y * half_extent.y);
+    assert!(center.abs_diff_eq(cube_transform.translation, 1.0e-6));
+    assert!(half_extent.abs_diff_eq(cube_transform.scale * 0.5, 1.0e-6));
+    Ok(())
+}
+
 fn check_displays(
     fixture: &fixture::Fixture,
     placed: BlockPos,
     state: BlockStateId,
 ) -> Result<(), Box<dyn Error>> {
+    check_display_geometry(state)?;
     let world = &fixture.world;
     let connection = &fixture.player.connection;
     let pos = ChunkPos::new(0, 0);

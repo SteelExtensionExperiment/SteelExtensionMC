@@ -21,6 +21,7 @@ pub(crate) enum LoginPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ConfigurationPhase {
     SynchronizeRegistries,
+    ResourcePack,
     JoinWorld,
 }
 
@@ -47,6 +48,9 @@ impl Display for PrePlayPhase {
             Self::Configuration(ConfigurationPhase::SynchronizeRegistries) => {
                 formatter.write_str("known-pack negotiation")
             }
+            Self::Configuration(ConfigurationPhase::ResourcePack) => {
+                formatter.write_str("resource pack negotiation")
+            }
             Self::Configuration(ConfigurationPhase::JoinWorld) => {
                 formatter.write_str("configuration finish")
             }
@@ -62,6 +66,7 @@ pub(crate) enum PrePlayPacket {
     Key,
     LoginAcknowledged,
     SelectKnownPacks,
+    ResourcePackResponse,
     FinishConfiguration,
 }
 
@@ -73,6 +78,7 @@ impl Display for PrePlayPacket {
             Self::Key => formatter.write_str("key packet"),
             Self::LoginAcknowledged => formatter.write_str("login acknowledgement"),
             Self::SelectKnownPacks => formatter.write_str("known-pack selection"),
+            Self::ResourcePackResponse => formatter.write_str("resource pack response"),
             Self::FinishConfiguration => formatter.write_str("configuration acknowledgement"),
         }
     }
@@ -118,12 +124,14 @@ enum State {
 #[derive(Debug)]
 pub(crate) struct PrePlayState {
     state: State,
+    resource_pack_loaded: bool,
 }
 
 impl PrePlayState {
     pub(crate) const fn new() -> Self {
         Self {
             state: State::Handshake,
+            resource_pack_loaded: false,
         }
     }
 
@@ -175,6 +183,13 @@ impl PrePlayState {
                         ..
                     },
                     PrePlayPacket::SelectKnownPacks
+                )
+                | (
+                    State::Configuration {
+                        phase: ConfigurationPhase::ResourcePack,
+                        ..
+                    },
+                    PrePlayPacket::ResourcePackResponse
                 )
                 | (
                     State::Configuration {
@@ -246,13 +261,34 @@ impl PrePlayState {
         }
     }
 
-    pub(crate) fn select_known_packs(&mut self) -> Result<(), PacketSequenceError> {
+    pub(crate) fn select_known_packs(
+        &mut self,
+        offers_resource_pack: bool,
+    ) -> Result<(), PacketSequenceError> {
         self.expect(PrePlayPacket::SelectKnownPacks)?;
         let State::Configuration { phase, .. } = &mut self.state else {
             return Err(self.unexpected(PrePlayPacket::SelectKnownPacks));
         };
-        *phase = ConfigurationPhase::JoinWorld;
+        *phase = if offers_resource_pack {
+            ConfigurationPhase::ResourcePack
+        } else {
+            ConfigurationPhase::JoinWorld
+        };
         Ok(())
+    }
+
+    pub(crate) fn finish_resource_pack(&mut self, loaded: bool) -> Result<(), PacketSequenceError> {
+        self.expect(PrePlayPacket::ResourcePackResponse)?;
+        let State::Configuration { phase, .. } = &mut self.state else {
+            return Err(self.unexpected(PrePlayPacket::ResourcePackResponse));
+        };
+        *phase = ConfigurationPhase::JoinWorld;
+        self.resource_pack_loaded = loaded;
+        Ok(())
+    }
+
+    pub(crate) const fn resource_pack_loaded(&self) -> bool {
+        self.resource_pack_loaded
     }
 
     pub(crate) fn finish_configuration(&mut self) -> Result<GameProfile, PacketSequenceError> {
@@ -319,7 +355,7 @@ mod tests {
             .acknowledge_login()
             .expect("client should acknowledge login");
         state
-            .select_known_packs()
+            .select_known_packs(false)
             .expect("client should select known packs");
         let accepted = state
             .finish_configuration()
@@ -327,6 +363,27 @@ mod tests {
 
         assert_eq!(accepted.id(), authenticated_id);
         assert_eq!(state.phase(), PrePlayPhase::Play);
+    }
+
+    #[test]
+    fn resource_pack_negotiation_gates_configuration_and_records_the_representation() {
+        for loaded in [false, true] {
+            let mut state = login_state();
+            state
+                .complete_login(profile(offline_uuid("Steve"), "Steve"))
+                .expect("offline login");
+            state.acknowledge_login().expect("login acknowledgement");
+            assert!(state.finish_resource_pack(loaded).is_err());
+            state.select_known_packs(true).expect("known pack response");
+            assert!(state.finish_configuration().is_err());
+            state
+                .finish_resource_pack(loaded)
+                .expect("terminal pack response");
+            state
+                .finish_configuration()
+                .expect("configuration completion");
+            assert_eq!(state.resource_pack_loaded(), loaded);
+        }
     }
 
     #[test]
@@ -341,7 +398,7 @@ mod tests {
             .acknowledge_login()
             .expect("client should acknowledge login");
         state
-            .select_known_packs()
+            .select_known_packs(false)
             .expect("client should select known packs");
         let accepted = state
             .finish_configuration()
@@ -419,9 +476,9 @@ mod tests {
         );
 
         state
-            .select_known_packs()
+            .select_known_packs(false)
             .expect("client should select known packs");
-        assert!(state.select_known_packs().is_err());
+        assert!(state.select_known_packs(false).is_err());
         assert_eq!(
             state.phase(),
             PrePlayPhase::Configuration(ConfigurationPhase::JoinWorld)

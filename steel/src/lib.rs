@@ -31,6 +31,7 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 pub mod config;
 /// A module for logging utilities.
 pub mod logger;
+mod resource_pack;
 
 /// Static access to the server
 pub static SERVER: OnceLock<Arc<Server>> = OnceLock::new();
@@ -49,6 +50,7 @@ pub struct SteelServer {
     pub connection_session: Arc<ServerConnectionSession>,
     /// Initialized native extensions, kept to run their shutdown callbacks.
     pub extensions: host::InitializedExtensions,
+    resource_pack: Option<resource_pack::ResourcePack>,
 }
 
 /// Folder scanned for extension packages and libraries, also holding each extension's data
@@ -189,7 +191,12 @@ impl SteelServer {
                 },
             )?;
         let player_idle_timeout = steel_config.server.player_idle_timeout;
-        let runtime_config = steel_config.server.into_runtime_config();
+        let mut server_config = steel_config.server;
+        let resource_pack = std::mem::take(&mut server_config.resource_pack)
+            .prepare(steel_registry::REGISTRY.client_content.resource_pack())
+            .await
+            .map_err(SteelServerError::Core)?;
+        let runtime_config = server_config.into_runtime_config();
 
         let server = Server::new_with_extensions(
             chunk_runtime,
@@ -221,12 +228,21 @@ impl SteelServer {
             server: Arc::new(server),
             connection_session: Arc::new(ServerConnectionSession::default()),
             extensions: initialized,
+            resource_pack,
         })
     }
 
     /// Starts the server and begins accepting connections.
     pub async fn start(&mut self, task_tracker: TaskTracker) {
         log::info!("Started Steel Server");
+
+        if let Some(host) = self
+            .resource_pack
+            .as_mut()
+            .and_then(|pack| pack.host.take())
+        {
+            task_tracker.spawn(host.run(self.cancel_token.clone(), task_tracker.clone()));
+        }
 
         let server = Arc::clone(&self.server);
         let token = self.cancel_token.clone();
@@ -258,7 +274,8 @@ impl SteelServer {
                     self.client_id = self.client_id.wrapping_add(1);
                     log::info!("Accepted connection from Java Edition: {address} (id {})", self.client_id);
 
-                    let java_client = Arc::new(java_client);
+                    let offer = self.resource_pack.as_ref().map(|pack| Arc::clone(&pack.offer));
+                    let java_client = Arc::new(java_client.with_resource_pack(offer));
                     java_client.start_outgoing_packet_task(sender_recv);
                     java_client.start_incoming_packet_task(net_reader);
                     // Java_client won't drop until the incoming and outcoming task close

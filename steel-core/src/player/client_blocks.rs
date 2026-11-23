@@ -9,10 +9,7 @@ use std::mem;
 use steel_protocol::packets::game::{CAddEntity, CRemoveEntities, CSetEntityData};
 use steel_protocol::{packet_traits::EncodedPacket, utils::ConnectionProtocol};
 use steel_registry::{
-    REGISTRY, RegistryEntry,
-    blocks::block_state_ext::BlockStateExt,
-    entity_data::{Quaternionf, Vector3f},
-    vanilla_entities,
+    REGISTRY, RegistryEntry, blocks::block_state_ext::BlockStateExt, vanilla_entities,
     vanilla_entity_data::ItemDisplayEntityData,
 };
 use steel_utils::{BlockPos, BlockStateId, ChunkPos};
@@ -122,31 +119,19 @@ impl ClientBlockDisplays {
                 entity_ids: old.ids,
             });
         }
+        let uses_pack = connection.uses_resource_pack();
         for display in displays {
+            let (item, transform) = display.for_client(uses_pack);
             let id = next_entity_id();
             let mut data = ItemDisplayEntityData::new();
-            data.item_stack.set(display.item.clone());
+            data.item_stack.set(item);
             // Vanilla probes display light at its entity position. Keep that
             // probe above the opaque carrier and compensate the model origin.
             let anchor = Vec3::new(0.5, 1.0, 0.5);
-            let translation = display.translation - anchor;
-            data.display.translation.set(Vector3f::new(
-                translation.x,
-                translation.y,
-                translation.z,
-            ));
-            data.display.scale.set(Vector3f::new(
-                display.scale.x,
-                display.scale.y,
-                display.scale.z,
-            ));
-            let rotation = display.rotation;
-            data.display.left_rotation.set(Quaternionf::new(
-                rotation.x, rotation.y, rotation.z, rotation.w,
-            ));
+            data.display.translation.set(transform.translation - anchor);
+            data.display.scale.set(transform.scale);
+            data.display.left_rotation.set(transform.rotation);
             data.display.base.no_gravity.set(true);
-            // Display passenger/vehicle attachments are zero in vanilla, so
-            // the supplied composition needs no invisible parent entity.
             bundle.add(CAddEntity {
                 id,
                 uuid: Uuid::new_v4(),
