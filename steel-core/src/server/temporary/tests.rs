@@ -1,5 +1,6 @@
 use super::*;
 use crate::player::Player;
+use crate::server::world_operations::WorldOperationId;
 use crate::{
     bootstrap::init_globals,
     config::ResolvedDomainConfig,
@@ -22,7 +23,10 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-async fn finish(server: &Arc<Server>, id: WorldOperationId) -> Result<Identifier, String> {
+pub(super) async fn finish(
+    server: &Arc<Server>,
+    id: WorldOperationId,
+) -> Result<Identifier, String> {
     let deadline = Instant::now() + Duration::from_secs(10);
     for tick in 1.. {
         server.tick_jobs(tick, true);

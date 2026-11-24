@@ -196,10 +196,9 @@ foundationally (FR-015).
 lasting domain that is the existing entry in `DomainRandomSequences`, which needs an accessor from
 `Server`. For a new temporary domain the clone is the primary and creates fresh sequences.
 
-**Open point (A4).** After a temporary domain loses its first world, joining it again would fail
-at `mod.rs:111-114`, because the sequences live on the world. The proposed fix is to hold the
-sequences on `DomainEntry` for temporary domains too. This contradicts nothing in the decisions but
-adds a field, so it is flagged for confirmation.
+**Decision (A4, rejected by the user, 2026-11-24).** After a temporary domain loses its first world,
+joining it again fails at `mod.rs:111-114`, because the sequences live on the world. The sequences
+are not moved onto `DomainEntry`; `ExistingDomain` into such a domain fails with a clear message.
 
 ## R8. Removing a single world
 
@@ -267,8 +266,10 @@ adds a field, so it is flagged for confirmation.
 1. **Overlay memory** (R4): sharing helps unvisited chunks mostly. A follow-up could compress overlays.
 2. **Seed override with a real generator**: unsaved chunks near template edges would generate
    differently from the template's seed. With `steel:empty` this is invisible; for other generators
-   the host should warn, or reject an override. Needs a decision before US1 is finalized.
+   the host should warn, or reject an override. **Decided (2026-11-24): reject.** `clone_world`
+   fails immediately when `CloneSettings.seed` is `Some` and the template generator is not
+   `steel:empty`.
 3. **Shutdown cost**: `World::cleanup` serializes RAM worlds for nothing. Existing issue, not fixed here.
-4. **A4** (R7): random sequences held by the domain for temporary domains.
+4. **A4** (R7): rejected; a temporary domain without a default world cannot take new clones.
 5. **Operation leaks**: unread operations stay in the host table forever, so every caller must poll
    what it receives. Documented in [contracts/host-api.md](contracts/host-api.md).

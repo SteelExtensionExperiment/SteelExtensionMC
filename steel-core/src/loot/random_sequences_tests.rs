@@ -184,6 +184,7 @@ fn zero_seed_barrels_share_the_named_stream_for_generation_and_placement() {
                 .get(&Identifier::new_static("barrel_sequences", "nether"))
                 .expect("nether"),
         ] {
+            let world = &world;
             let barrel = BarrelBlockEntity::new(
                 Arc::downgrade(world),
                 BlockPos::new(1, 64, 1),
@@ -211,7 +212,7 @@ fn zero_seed_barrels_share_the_named_stream_for_generation_and_placement() {
             );
             drop(guard);
         }
-        let actual = bound(primary);
+        let actual = bound(&primary);
         assert_eq!(draw(&actual, sequence), draw(&expected, sequence));
     });
 }
@@ -237,7 +238,7 @@ fn advancement_rewards_continue_the_named_loot_stream() {
     let world = &worlds
         .default_world("advancement_sequences")
         .expect("world");
-    let player = TestPlayerBuilder::new(Arc::clone(world), "Player", 1).build();
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Player", 1).build();
     let expected = RandomSequences::from_persistent(
         world.level_data.read().seed(),
         PersistentRandomSequences::default(),
@@ -253,7 +254,7 @@ fn advancement_rewards_continue_the_named_loot_stream() {
     for _ in 0..2 {
         expected
             .with_random(sequence, |random| {
-                let mut context = LootContext::new(random).with_world(world);
+                let mut context = LootContext::new(random).with_world(&world);
                 for mut item in table.get_random_items(&mut context)? {
                     assert!(inventory.add(&mut item));
                 }
@@ -263,7 +264,7 @@ fn advancement_rewards_continue_the_named_loot_stream() {
         grant_reward(&player, &reward);
         assert_eq!(player.inventory.lock().items(), inventory.items());
     }
-    let actual = bound(world);
+    let actual = bound(&world);
     assert_eq!(draw(&actual, sequence), draw(&expected, sequence));
 }
 

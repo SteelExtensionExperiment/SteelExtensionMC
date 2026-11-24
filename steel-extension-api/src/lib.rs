@@ -32,8 +32,9 @@ pub mod text;
 pub mod world_effects;
 pub mod worlds;
 pub use runtime::{
-    Billboard, BotInput, Difficulty, GameMode, HologramId, Operation, OperationState,
-    OperationStatus, PlayerControls, PlayerId, PlayerInfo, Position, WorldSettings,
+    Billboard, BotInput, CloneSettings, CloneTarget, Difficulty, GameMode, HologramId, Operation,
+    OperationState, OperationStatus, PlayerControls, PlayerId, PlayerInfo, Position, TemplateState,
+    TemplateStatus, WorldSettings,
     api::{Command, Commands, Server},
 };
 #[cfg(feature = "host")]

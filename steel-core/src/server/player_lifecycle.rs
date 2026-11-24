@@ -211,7 +211,7 @@ impl Server {
         })
     }
 
-    fn resolve_saved_world(
+    pub(super) fn resolve_saved_world(
         &self,
         saved_world: &str,
         target_domain: &str,
@@ -235,7 +235,18 @@ impl Server {
         {
             return None;
         }
-        let Some(saved_world) = self.worlds.get(&saved_world_key) else {
+        // Runtime worlds of a lasting domain are never persisted, and their keys can be reused
+        // for a different map after a restart, so a saved key must not send the player there.
+        if self.worlds.is_runtime_world(&saved_world_key)
+            && !self.player_data_storage.is_temporary_domain(target_domain)
+        {
+            return None;
+        }
+        let Some(saved_world) = self
+            .worlds
+            .get(&saved_world_key)
+            .filter(|world| !world.is_retiring())
+        else {
             log::warn!(
                 "Saved world {saved_world_key} for player {player_name} is missing, using target spawn"
             );
@@ -527,10 +538,16 @@ impl Server {
         &self,
         domain: &str,
     ) -> Result<(Arc<World>, RespawnData), String> {
-        let default_world = self
-            .worlds
-            .default_world(domain)
-            .ok_or_else(|| format!("domain {domain} has no default world"))?;
+        let Some(default_world) = self.worlds.default_world(domain) else {
+            // A temporary domain whose first world was removed respawns in the server default domain.
+            if self.worlds.has_domain(domain)
+                && self.player_data_storage.is_temporary_domain(domain)
+                && domain != self.worlds.default_domain()
+            {
+                return self.respawn_world_and_data_for_domain(self.worlds.default_domain());
+            }
+            return Err(format!("domain {domain} has no default world"));
+        };
         let respawn_data = {
             let level_data = default_world.level_data.read();
             level_data.data().respawn_data_or_local(&default_world.key)

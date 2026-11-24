@@ -11,7 +11,7 @@ Strict read-only reader for a world's `region/` directory.
 
 | Item | Rule |
 | --- | --- |
-| Input | A region directory path and the rayon decode pool. |
+| Input | `read_all(region_dir, min_y, height, pool)`: the region directory, the world's build range for `validate_persistent_chunk`, and the rayon decode pool. A missing directory yields no chunks and is not created. |
 | Files | Every `r.<x>.<z>.srg`. Other files are ignored with a debug log. |
 | Header | Magic `STLR` and `FORMAT_VERSION` must match; otherwise an error. Entry validation is shared with `RegionManager` through `RegionHeader::validate_entries` and `ChunkEntry::validate` (moved into `format.rs`). |
 | Per chunk | zstd, then `wincode` to `PersistentChunk`, then `validate_persistent_chunk(min_y, height)`. Entities are cleared and the payload re-encoded only when entities were present. |
@@ -29,7 +29,7 @@ Immutable, shared as `Arc<WorldTemplate>`.
 | --- | --- |
 | `key` | `Identifier`, chosen by the caller (the world-cloner extension uses `world-cloner:<name>`). |
 | `source` | Source folder path (diagnostics only). |
-| `generation` | `WorldGenerationSettings` from `level.toml` (generator, config, dimension type, `min_y`, `height`). Required; absent means Failed. |
+| `generation` | `WorldGenerationSettings` from `level.toml` (generator, config, dimension type, `min_y`, `height`). Required; absent means Failed. The saved generator must be registered (`validate_config`) and its dimension type, `min_y` and `height` must equal the saved ones; the config itself is taken as saved. |
 | `seed`, `spawn`, `spawn_angle`, `difficulty` | Defaults for clones. |
 | `chunks` | `FxHashMap<ChunkPos, TemplateChunk { status: ChunkStatus, payload: Box<[u8]> }>`; payloads are the compressed `PersistentChunk` bytes without entities. |
 | Methods | `chunk(pos)`, `memory_bytes()`. A short manual `Debug`. |
@@ -95,7 +95,7 @@ domain identity (existing rule, `mod.rs:94-96`).
 
 | Field | Change |
 | --- | --- |
-| `default_worlds: Map<String, Identifier>` | Replaced by `domains: Map<String, DomainEntry { default_world: Option<Identifier>, random_sequences: Option<Arc<RandomSequences>> }>`. The sequences field is assumption A4. |
+| `default_worlds: Map<String, Identifier>` | Replaced by `domains: Map<String, DomainEntry { default_world: Option<Identifier> }>`. Random sequences stay on the default world (A4 rejected). |
 | `runtime_worlds: Set<Identifier>` | New. Every world that can be removed. |
 | `clock_owners: Vec<Identifier>` | New. `advance_domain_game_times` advances these instead of reading default worlds. |
 | `has_domain` | Reads `domains`, so it stays true after the default world is removed. |
@@ -125,8 +125,9 @@ covers lasting domains that receive clones.
 
 ### `DomainRandomSequences` (extended) — `loot/random_sequences.rs`
 
-Gains an accessor so `Server` can hand a lasting domain's shared sequences to a new clone. No change
-to saving (`save` already uses the domain default world).
+Gains an accessor so `Server` can hand a lasting domain's shared sequences to a new clone. A
+temporary domain's sequences stay on its default world (A4 rejected). No change to saving (`save`
+already uses the domain default world).
 
 ## Platform: extension API (`steel-extension-api`)
 

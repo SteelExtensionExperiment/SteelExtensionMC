@@ -41,7 +41,11 @@ the existing `Server::operation_status`, which consumes the result on the first 
 - `target = NewTemporaryDomain`: the key's namespace is a new temporary domain name that has never
   been used; the clone becomes the domain's default world and its random sequences are created fresh.
 - `target = ExistingDomain`: the key's namespace is a loaded domain, lasting or temporary and not
-  closing; the clone joins it and uses the domain's random sequences.
+  closing; the clone joins it and uses the domain's random sequences. A temporary domain whose
+  first world was removed has no default world and no sequences to share, so this fails with a
+  clear message (decision A4, rejected by the user).
+- A `Some` `settings.seed` fails immediately unless the template's generator is `steel:empty`, so a
+  clone never generates unsaved chunks from a different seed than its saved ones (decision R10.2).
 - Fails immediately (no operation) when the template is not Ready, the key is loaded or pending, the
   domain rules above are not met, or the resolved spawn is outside the dimension's build height.
 - Defaults come from the template (seed, spawn, difficulty) and every `Some` field of `settings`

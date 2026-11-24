@@ -23,14 +23,14 @@
 - [x] Dependencies and assumptions identified (A1–A8)
 - [ ] Success criteria are measurable: SC-001 to SC-003 numbers are **proposals** and must be
       confirmed, then measured in T020
-- [ ] Assumption A4 (temporary-domain random sequences held by the domain) confirmed by the user
+- [x] Assumption A4 (temporary-domain random sequences held by the domain) rejected by the user; see spec A4
 
 ## Feature Readiness
 
 - [x] Every functional requirement maps to at least one task in tasks.md
 - [x] User scenarios cover primary flows (clone, add to domain, remove)
 - [x] Platform gaps are listed and flagged as shared host work (plan.md)
-- [ ] Open point R10.2: seed override with a non-`steel:empty` template generator decided
+- [x] Open point R10.2: seed override with a non-`steel:empty` template generator decided (reject)
 
 ## Notes
 

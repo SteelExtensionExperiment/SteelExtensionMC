@@ -4,13 +4,13 @@ pub mod api {
     #[cfg(feature = "host")]
     use crate::host::{holograms, runtime as host};
     use crate::runtime::{
-        Billboard, BotInput, GameMode, HologramId, Operation, OperationStatus, PlayerId,
-        PlayerInfo, Position, WorldSettings,
+        Billboard, BotInput, CloneSettings, CloneTarget, GameMode, HologramId, Operation,
+        OperationStatus, PlayerId, PlayerInfo, Position, TemplateStatus, WorldSettings,
     };
     use crate::{ApiResult, BlockPos, BlockState, Hooks};
     #[cfg(feature = "host")]
     use stabby::string::String as ApiString;
-    use stabby::{slice::Slice, str::Str, vec::Vec as ApiVec};
+    use stabby::{option::Option as StableOption, slice::Slice, str::Str, vec::Vec as ApiVec};
     #[cfg(feature = "host")]
     use std::sync::Arc;
     #[cfg(feature = "host")]
@@ -112,6 +112,74 @@ pub mod api {
             )
             .map_err(ApiString::from)
             .into()
+        }
+        /// Starts loading the saved world in the directory `path` (holding `region/` and
+        /// `level.toml`) as template `key`. The operation's value is the key. A failed template
+        /// keeps its key; retry with a new one.
+        pub fn load_world_template(&self, key: Str<'_>, path: Str<'_>) -> ApiResult<Operation> {
+            host::load_world_template(self.host(), key.as_str(), path.as_str())
+                .map_err(ApiString::from)
+                .into()
+        }
+        /// Status of a template, or none when the key was never loaded.
+        #[must_use]
+        pub fn world_template_status(&self, key: Str<'_>) -> StableOption<TemplateStatus> {
+            host::world_template_status(self.host(), key.as_str())
+                .map_or_else(StableOption::None, StableOption::Some)
+        }
+        /// Starts a RAM-only copy of template `template` under `key`. It owns its clock, starts
+        /// at game time 0 and has no entities. The operation's value is the world key.
+        pub fn clone_world(
+            &self,
+            template: Str<'_>,
+            key: Str<'_>,
+            target: CloneTarget,
+            settings: CloneSettings,
+        ) -> ApiResult<Operation> {
+            host::clone_world(
+                self.host(),
+                template.as_str(),
+                key.as_str(),
+                target,
+                settings,
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
+        /// Starts a RAM-only world from a registered generator with its default configuration.
+        /// Unlike `create_temporary_world` the world owns its clock. The operation's value is the
+        /// world key.
+        pub fn create_world(
+            &self,
+            key: Str<'_>,
+            generator: Str<'_>,
+            target: CloneTarget,
+            settings: WorldSettings,
+        ) -> ApiResult<Operation> {
+            host::create_runtime_world(
+                self.host(),
+                key.as_str(),
+                generator.as_str(),
+                target,
+                settings,
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
+        /// Starts removing a runtime world. The world refuses new entries at once, its players
+        /// move to the domain default world (else the server default world), and the operation's
+        /// value is the world key once it is retired. A domain keeps existing without a default
+        /// world and then refuses `switch_domain`.
+        pub fn remove_world(&self, key: Str<'_>) -> ApiResult<Operation> {
+            host::remove_world(self.host(), key.as_str())
+                .map_err(ApiString::from)
+                .into()
+        }
+        /// Whether `remove_world` would accept the key now: a runtime world that is not being
+        /// removed, not in a closing domain and not the clock of other worlds.
+        #[must_use]
+        pub fn world_is_removable(&self, key: Str<'_>) -> bool {
+            host::world_is_removable(self.host(), key.as_str())
         }
         /// Reads an operation, consuming its result when complete.
         pub fn operation_status(&self, operation: Operation) -> ApiResult<OperationStatus> {

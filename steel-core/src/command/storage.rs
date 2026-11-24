@@ -188,11 +188,8 @@ impl DomainCommandStorage {
     pub(crate) async fn save(&self, worlds: &WorldMap) -> io::Result<usize> {
         let _save_guard = self.save_lock.lock().await;
         let mut saved = 0;
-        // Retain primary worlds across I/O; a temporary domain can retire concurrently.
-        for world in worlds.values() {
-            if !world.level_data.read().owns_game_time() {
-                continue;
-            }
+        // Retain default worlds across I/O; a temporary domain can retire concurrently.
+        for world in worlds.domain_default_worlds() {
             let domain = world.domain();
             let Some(storage) = self.get(domain) else {
                 continue;

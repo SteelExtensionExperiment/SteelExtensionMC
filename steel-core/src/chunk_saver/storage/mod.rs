@@ -16,6 +16,7 @@ use crate::chunk::paletted_container::PalettedContainer;
 use crate::chunk::section::{ChunkSection, SectionHolder, Sections};
 use crate::chunk::{Chunk, status::ChunkStatus};
 use crate::chunk_saver::bit_pack::{bits_for_palette_len, pack_indices_from_iter, unpack_indices};
+use crate::config::WorldStorageConfig;
 use crate::entity::{
     ENTITIES, Entity, EntityBase, EntityBaseSaveData, EntityFireFreezeState, EntityLoadRequest,
     MAX_ENTITY_TAGS, RemovalReason, SharedEntity,
@@ -466,6 +467,18 @@ pub struct LoadedChunk {
 }
 
 impl ChunkStorage {
+    /// Creates the storage backend a world is configured with.
+    #[must_use]
+    pub fn from_config(config: &WorldStorageConfig) -> Arc<Self> {
+        Arc::new(match config {
+            WorldStorageConfig::Disk { path } => Self::Disk(RegionManager::new(path.clone())),
+            WorldStorageConfig::RamOnly => Self::RamOnly(RamOnlyStorage::empty_world()),
+            WorldStorageConfig::RamClone { template } => {
+                Self::RamOnly(RamOnlyStorage::from_template(Arc::clone(template)))
+            }
+        })
+    }
+
     /// Loads a chunk from storage.
     ///
     /// Returns `Ok(None)` if the chunk doesn't exist in storage.
@@ -481,7 +494,7 @@ impl ChunkStorage {
     ) -> io::Result<Option<LoadedChunk>> {
         match self {
             Self::Disk(rm) => rm.load_chunk(pos, min_y, height, level, thread_pool).await,
-            Self::RamOnly(ram) => ram.load_chunk(pos, min_y, height, level).await,
+            Self::RamOnly(ram) => ram.load_chunk(pos, min_y, height, level, thread_pool).await,
         }
     }
 

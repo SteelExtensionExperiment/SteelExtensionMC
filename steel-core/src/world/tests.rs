@@ -129,6 +129,7 @@ fn disconnect_while_riding_removes_the_vehicle_like_vanilla() {
     );
 
     let (player, _domain, saved) = world.detach_player_for_disconnect(Arc::clone(&player));
+    let saved = saved.expect("disconnect should snapshot the player");
 
     assert!(vehicle.is_removed());
     assert_eq!(
@@ -141,7 +142,6 @@ fn disconnect_while_riding_removes_the_vehicle_like_vanilla() {
         "the mount disappears from the world when its rider disconnects"
     );
     assert!(player.vehicle().is_none());
-    let saved = saved.expect("player data should save");
     assert_eq!(
         saved.root_vehicle.as_ref().map(|root| root.entity.uuid),
         Some(*vehicle.uuid().as_bytes()),
