@@ -4,8 +4,8 @@
 //! client's chunk membership, owned under the same lock as chunk packet commits.
 
 use glam::{DVec3, Vec3};
-use rustc_hash::FxHashMap;
-use std::mem;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::{collections::hash_map::Entry, mem, sync::Arc};
 use steel_protocol::packets::game::{CAddEntity, CRemoveEntities, CSetEntityData};
 use steel_protocol::{packet_traits::EncodedPacket, utils::ConnectionProtocol};
 use steel_registry::{
@@ -19,22 +19,58 @@ use super::{
     PlayerConnection,
     connection::{BundleBuilder, NetworkConnection},
 };
-use crate::{chunk::full_chunk::FullChunkRef, entity::next_entity_id};
+use crate::{
+    block_entity::StorageDisplay, chunk::full_chunk::FullChunkRef, entity::next_entity_id,
+    world::World,
+};
 
 #[derive(Debug)]
 struct DisplayGroup {
     state: BlockStateId,
+    storage_display: Option<Arc<StorageDisplay>>,
     ids: Vec<i32>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BlockVisual {
+    pub(crate) pos: BlockPos,
+    pub(crate) state: BlockStateId,
+    storage_display: Option<Arc<StorageDisplay>>,
+}
+
+impl BlockVisual {
+    pub(crate) fn live(world: &World, pos: BlockPos, state: BlockStateId) -> Self {
+        let storage_display = if REGISTRY
+            .block_entity_types
+            .is_storage_block(state.get_block())
+        {
+            world
+                .chunk_map
+                .with_full_chunk(ChunkPos::from_block_pos(pos), |chunk| {
+                    chunk.storage_display(pos, state)
+                })
+                .flatten()
+        } else {
+            None
+        };
+        Self {
+            pos,
+            state,
+            storage_display,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct ClientBlockDisplays {
     chunks: FxHashMap<ChunkPos, FxHashMap<BlockPos, DisplayGroup>>,
+    // A construction part can be covered by more than one visible assembly.
+    covered: FxHashMap<BlockPos, usize>,
 }
 
 impl ClientBlockDisplays {
     /// The snapshot is collected in the same revision window as the chunk packet.
-    pub(crate) fn snapshot(chunk: FullChunkRef<'_>) -> Vec<(BlockPos, BlockStateId)> {
+    pub(crate) fn snapshot(chunk: FullChunkRef<'_>) -> Vec<BlockVisual> {
         if !REGISTRY.client_content.has_blocks() {
             return Vec::new();
         }
@@ -52,14 +88,16 @@ impl ClientBlockDisplays {
                 if REGISTRY.client_content.block(state.get_block()).is_none() {
                     continue;
                 }
-                blocks.push((
-                    BlockPos::new(
-                        chunk_pos.0.x * 16 + (index & 15) as i32,
-                        chunk.min_y() + section_index as i32 * 16 + (index >> 8) as i32,
-                        chunk_pos.0.y * 16 + ((index >> 4) & 15) as i32,
-                    ),
+                let pos = BlockPos::new(
+                    chunk_pos.0.x * 16 + (index & 15) as i32,
+                    chunk.min_y() + section_index as i32 * 16 + (index >> 8) as i32,
+                    chunk_pos.0.y * 16 + ((index >> 4) & 15) as i32,
+                );
+                blocks.push(BlockVisual {
+                    pos,
                     state,
-                ));
+                    storage_display: chunk.storage_display(pos, state),
+                });
             }
         }
         blocks
@@ -69,30 +107,59 @@ impl ClientBlockDisplays {
         &mut self,
         connection: &PlayerConnection,
         chunk: ChunkPos,
-        blocks: &[(BlockPos, BlockStateId)],
+        blocks: &[BlockVisual],
     ) {
-        self.remove_chunk(connection, chunk);
-        for &(pos, state) in blocks {
-            self.update(connection, pos, state);
-        }
-    }
-
-    pub(crate) fn update(
-        &mut self,
-        connection: &PlayerConnection,
-        pos: BlockPos,
-        state: BlockStateId,
-    ) {
+        let mut changed = FxHashSet::default();
+        self.forget_chunk(connection, chunk, &mut changed);
         if connection.closed() {
             return;
         }
+        for visual in blocks {
+            self.update_source(connection, visual, &mut changed);
+        }
+        for pos in changed {
+            self.refresh_display(connection, pos);
+        }
+    }
+
+    pub(crate) fn update(&mut self, connection: &PlayerConnection, visual: &BlockVisual) {
+        if connection.closed() {
+            return;
+        }
+        let mut changed = FxHashSet::default();
+        self.update_source(connection, visual, &mut changed);
+        let source_changed = changed.remove(&visual.pos);
+        for pos in changed {
+            self.refresh_display(connection, pos);
+        }
+        if source_changed {
+            self.refresh_display(connection, visual.pos);
+        }
+    }
+
+    fn update_source(
+        &mut self,
+        connection: &PlayerConnection,
+        visual: &BlockVisual,
+        changed: &mut FxHashSet<BlockPos>,
+    ) {
+        let BlockVisual {
+            pos,
+            state,
+            storage_display,
+        } = visual;
+        let (pos, state) = (*pos, *state);
         let chunk_pos = ChunkPos::from_block_pos(pos);
-        let block = state.get_block();
         if let Some(group) = self
             .chunks
             .get(&chunk_pos)
             .and_then(|blocks| blocks.get(&pos))
             && group.state == state
+            && match (&group.storage_display, storage_display) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            }
         {
             return;
         }
@@ -100,25 +167,103 @@ impl ClientBlockDisplays {
             .chunks
             .get_mut(&chunk_pos)
             .and_then(|blocks| blocks.remove(&pos));
-        let model = REGISTRY.client_content.block(block);
-        let Some(model) = model.filter(|model| !model.displays_for(state).is_empty()) else {
-            if let Some(old) = old {
+        if let Some(old) = old {
+            if connection.uses_resource_pack()
+                && let Some(display) = old.storage_display
+            {
+                self.change_coverage(&display.parts, false, changed);
+            }
+            if !old.ids.is_empty() {
                 Self::send_removals(connection, old.ids);
             }
+        }
+        if let Some(display) = storage_display {
+            if connection.uses_resource_pack() {
+                self.change_coverage(&display.parts, true, changed);
+            }
+        } else if !Self::has_registered_displays(connection, state) {
             if self.chunks.get(&chunk_pos).is_some_and(FxHashMap::is_empty) {
                 self.chunks.remove(&chunk_pos);
             }
             return;
-        };
-
-        let displays = model.displays_for(state);
-        let mut ids = Vec::with_capacity(displays.len());
-        let mut bundle = BundleBuilder::new(connection.compression());
-        if let Some(old) = old {
-            bundle.add(CRemoveEntities {
-                entity_ids: old.ids,
-            });
         }
+        self.chunks.entry(chunk_pos).or_default().insert(
+            pos,
+            DisplayGroup {
+                state,
+                storage_display: storage_display.as_ref().map(Arc::clone),
+                ids: Vec::new(),
+            },
+        );
+        changed.insert(pos);
+    }
+
+    fn has_registered_displays(connection: &PlayerConnection, state: BlockStateId) -> bool {
+        let block = state.get_block();
+        let content = &REGISTRY.client_content;
+        (connection.uses_resource_pack() || !content.is_construction_part(block))
+            && content
+                .block(block)
+                .is_some_and(|model| !model.displays_for(state).is_empty())
+    }
+
+    fn change_coverage(
+        &mut self,
+        parts: &[BlockPos],
+        visible: bool,
+        changed: &mut FxHashSet<BlockPos>,
+    ) {
+        for &part in parts {
+            match (self.covered.entry(part), visible) {
+                (Entry::Vacant(entry), true) => {
+                    entry.insert(1);
+                    changed.insert(part);
+                }
+                (Entry::Occupied(mut entry), true) => *entry.get_mut() += 1,
+                (Entry::Occupied(mut entry), false) => {
+                    if *entry.get() == 1 {
+                        entry.remove();
+                        changed.insert(part);
+                    } else {
+                        *entry.get_mut() -= 1;
+                    }
+                }
+                (Entry::Vacant(_), false) => {}
+            }
+        }
+    }
+
+    fn refresh_display(&mut self, connection: &PlayerConnection, pos: BlockPos) {
+        let Some(group) = self
+            .chunks
+            .get_mut(&ChunkPos::from_block_pos(pos))
+            .and_then(|blocks| blocks.get_mut(&pos))
+        else {
+            return;
+        };
+        let content = &REGISTRY.client_content;
+        let block = group.state.get_block();
+        let displays = if let Some(display) = &group.storage_display {
+            std::slice::from_ref(&display.model)
+        } else if content.is_construction_part(block) && self.covered.contains_key(&pos) {
+            &[]
+        } else {
+            content
+                .block(block)
+                .map_or(&[][..], |model| model.displays_for(group.state))
+        };
+        if displays.is_empty() {
+            if !group.ids.is_empty() {
+                Self::send_removals(connection, mem::take(&mut group.ids));
+            }
+            return;
+        }
+        if !group.ids.is_empty() {
+            return;
+        }
+
+        group.ids.reserve(displays.len());
+        let mut bundle = BundleBuilder::new(connection.compression());
         let uses_pack = connection.uses_resource_pack();
         for display in displays {
             let (item, transform) = display.for_client(uses_pack);
@@ -127,7 +272,12 @@ impl ClientBlockDisplays {
             data.item_stack.set(item);
             // Vanilla probes display light at its entity position. Keep that
             // probe above the opaque carrier and compensate the model origin.
-            let anchor = Vec3::new(0.5, 1.0, 0.5);
+            let probe_y = if group.storage_display.is_some() {
+                (transform.translation.y + transform.scale.y * 0.5).ceil()
+            } else {
+                1.0
+            };
+            let anchor = Vec3::new(0.5, probe_y, 0.5);
             data.display.translation.set(transform.translation - anchor);
             data.display.scale.set(transform.scale);
             data.display.left_rotation.set(transform.rotation);
@@ -145,35 +295,58 @@ impl ClientBlockDisplays {
                 data: 0,
             });
             bundle.add(CSetEntityData::new(id, data.pack_all()));
-            ids.push(id);
+            group.ids.push(id);
         }
         connection.send_encoded_bundle(bundle.into_packets());
-        self.chunks
-            .entry(chunk_pos)
-            .or_default()
-            .insert(pos, DisplayGroup { state, ids });
     }
 
     pub(crate) fn remove_chunk(&mut self, connection: &PlayerConnection, chunk: ChunkPos) {
-        if let Some(blocks) = self.chunks.remove(&chunk)
-            && !connection.closed()
-        {
-            let entity_ids = blocks.into_values().flat_map(|group| group.ids).collect();
-            Self::send_removals(connection, entity_ids);
+        let mut changed = FxHashSet::default();
+        self.forget_chunk(connection, chunk, &mut changed);
+        if !connection.closed() {
+            for pos in changed {
+                self.refresh_display(connection, pos);
+            }
+        }
+    }
+
+    fn forget_chunk(
+        &mut self,
+        connection: &PlayerConnection,
+        chunk: ChunkPos,
+        changed: &mut FxHashSet<BlockPos>,
+    ) {
+        let Some(blocks) = self.chunks.remove(&chunk) else {
+            return;
+        };
+        let mut ids = Vec::new();
+        for group in blocks.into_values() {
+            if connection.uses_resource_pack()
+                && let Some(display) = group.storage_display
+            {
+                self.change_coverage(&display.parts, false, changed);
+            }
+            ids.extend(group.ids);
+        }
+        if !ids.is_empty() && !connection.closed() {
+            Self::send_removals(connection, ids);
         }
     }
 
     pub(crate) fn clear(&mut self, connection: &PlayerConnection) {
         let chunks = mem::take(&mut self.chunks);
+        self.covered.clear();
         if connection.closed() || chunks.is_empty() {
             return;
         }
-        let entity_ids = chunks
+        let entity_ids: Vec<_> = chunks
             .into_values()
             .flat_map(FxHashMap::into_values)
             .flat_map(|group| group.ids)
             .collect();
-        Self::send_removals(connection, entity_ids);
+        if !entity_ids.is_empty() {
+            Self::send_removals(connection, entity_ids);
+        }
     }
 
     fn send_removals(connection: &PlayerConnection, entity_ids: Vec<i32>) {

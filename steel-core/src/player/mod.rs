@@ -5,7 +5,7 @@ pub mod attachments;
 pub mod bot;
 pub mod chat;
 pub mod chunk_sender;
-mod client_blocks;
+pub(crate) mod client_blocks;
 /// This module contains the `PlayerConnection` trait that abstracts network connections.
 pub mod connection;
 mod container_counter;

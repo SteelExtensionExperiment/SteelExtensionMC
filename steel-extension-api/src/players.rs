@@ -140,6 +140,14 @@ pub mod api {
             .into()
         }
 
+        /// Whether the player loaded Steel's resource pack when joining this session.
+        #[must_use]
+        pub fn player_uses_resource_pack(&self, player: PlayerId) -> ApiResult<bool> {
+            host::with_player(self.host(), player, |p| p.connection.uses_resource_pack())
+                .map_err(ApiString::from)
+                .into()
+        }
+
         /// Current world, position and rotation.
         #[must_use]
         pub fn player_location(&self, player: PlayerId) -> ApiResult<Location> {

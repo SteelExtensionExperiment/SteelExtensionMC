@@ -45,6 +45,33 @@ pub(crate) fn run_registration_hooks(registry: &mut Registry) {
 }
 
 impl Registry {
+    /// Marks custom block displays as resource-pack construction visuals.
+    pub fn register_construction_parts(&mut self, states: &[BlockStateId]) -> Result<(), String> {
+        if self.client_content.frozen {
+            return Err("block registration has already finished".into());
+        }
+        let mut parts = Vec::with_capacity(states.len());
+        for &state in states {
+            let block = self
+                .blocks
+                .by_state_id(state)
+                .ok_or("unknown construction part")?;
+            if self
+                .client_content
+                .block(block)
+                .is_none_or(|model| model.displays_for(state).is_empty())
+            {
+                return Err(format!(
+                    "construction part {} requires a custom block display",
+                    block.key
+                ));
+            }
+            parts.push(block.id());
+        }
+        self.client_content.construction_parts.extend(parts);
+        Ok(())
+    }
+
     /// Adds extension assets before freezing the custom content registries.
     pub fn register_pack_assets(&mut self, files: BTreeMap<String, Vec<u8>>) -> Result<(), String> {
         if self.client_content.frozen {

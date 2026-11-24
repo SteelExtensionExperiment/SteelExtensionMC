@@ -4,14 +4,18 @@ pub mod api {
     #[cfg(feature = "host")]
     use crate::host::content::{self, ContentRegistration};
     use crate::{
-        ApiResult, BlockState, Registry,
+        ApiResult, BlockPos, BlockState, Registry, World,
         block_behavior::{DynBlockBehavior, OriginalBlockBehavior},
         content::{
             BedDefinition, BiomeDefinition, BlockDefinition, BlockItemDefinition, EntityDefinition,
-            FluidDefinition, ItemDefinition, RegisteredFluid, SlabMaterial, TextureFallback,
+            FluidDefinition, ItemDefinition, ItemDisplay, MultiblockDisplay, RegisteredFluid,
+            SlabMaterial, TextureFallback,
         },
     };
-    use stabby::{slice::Slice, str::Str, string::String as ApiString, vec::Vec as ApiVec};
+    use stabby::{
+        option::Option as ApiOption, slice::Slice, str::Str, string::String as ApiString,
+        vec::Vec as ApiVec,
+    };
 
     /// Exclusive access before the real item and block registries freeze.
     #[opaque]
@@ -232,6 +236,65 @@ pub mod api {
                 })
                 .map_err(ApiString::from)
                 .into()
+        }
+
+        /// Registers a placing item, custom behavior and a native persistent inventory type.
+        /// The behavior creates the backing entity with `BlockEntityCreation::storage`.
+        pub fn register_storage_block(
+            &mut self,
+            definition: BlockItemDefinition,
+            max_slots: u32,
+            factory: extern "C" fn(
+                Registry<'_>,
+                BlockState,
+                OriginalBlockBehavior,
+            ) -> ApiResult<DynBlockBehavior>,
+        ) -> ApiResult<BlockState> {
+            self.host_mut()
+                .register_block(Some(factory), |registry| {
+                    content::register_storage_block(registry, definition, max_slots)
+                })
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Registers a display for a previously registered storage block.
+        /// When present, it replaces the block's ordinary displays for all clients.
+        /// The radius covers the neighboring blocks read by the resolver.
+        pub fn register_storage_display(
+            &mut self,
+            block: Str<'_>,
+            radius: u8,
+            resolve: extern "C" fn(World<'_>, BlockPos) -> ApiOption<ItemDisplay>,
+        ) -> ApiResult<()> {
+            crate::host::storage::display::register(
+                self.host_mut().registry,
+                block.as_str(),
+                radius,
+                resolve,
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
+
+        /// Substitutes one model for the assembled structure. The registered parts' ordinary
+        /// displays are sent to packed clients while those parts are outside an assembly.
+        pub fn register_multiblock_storage_display(
+            &mut self,
+            block: Str<'_>,
+            radius: u8,
+            parts: Slice<'_, BlockState>,
+            resolve: extern "C" fn(World<'_>, BlockPos) -> ApiOption<MultiblockDisplay>,
+        ) -> ApiResult<()> {
+            crate::host::storage::display::register_multiblock(
+                self.host_mut().registry,
+                block.as_str(),
+                radius,
+                parts.as_slice(),
+                resolve,
+            )
+            .map_err(ApiString::from)
+            .into()
         }
     }
 

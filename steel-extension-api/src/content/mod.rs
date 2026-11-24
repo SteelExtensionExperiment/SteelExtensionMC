@@ -116,6 +116,15 @@ impl ItemDisplay {
     }
 }
 
+/// One assembled model and the world positions of the construction parts it covers.
+#[stabby::stabby]
+pub struct MultiblockDisplay {
+    /// Model drawn at the storage owner's position.
+    pub model: ItemDisplay,
+    /// Positions whose construction displays the model covers.
+    pub parts: ApiVec<crate::BlockPos>,
+}
+
 /// One named vanilla state property, such as `type=top` on a slab.
 #[stabby::stabby]
 #[derive(Debug, Clone)]

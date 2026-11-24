@@ -221,11 +221,12 @@ pub async fn until(
 /// others in `extension-example/<crate>`); build them first, see the crate README.
 pub fn library(name: &str) -> PathBuf {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let crate_dir = if name == "event_probe" {
-        root.join("tests/event-probe")
-    } else {
-        root.join("../extension-example")
-            .join(name.replace('_', "-"))
+    let crate_dir = match name {
+        "event_probe" => root.join("tests/event-probe"),
+        "steel_ui_extension" | "steel_ui_demo" => root.join("../extension-example/ui"),
+        _ => root
+            .join("../extension-example")
+            .join(name.replace('_', "-")),
     };
     crate_dir
         .join("target/debug")
@@ -369,7 +370,7 @@ pub async fn start(
         encryption: false,
         view_distance: 2,
         simulation_distance: 2,
-        max_players: 1,
+        max_players: 2,
         packet_workers: Some(1),
         compression: None,
         ..Default::default()

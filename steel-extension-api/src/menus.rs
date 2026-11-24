@@ -16,6 +16,16 @@
 
 use crate::{PlayerId, Server, callbacks::Table, events::ClickKind, items::ItemSpec};
 
+/// A per-view condition for interacting with a persistent block inventory.
+#[stabby::stabby(checked)]
+pub trait StorageAccess: Send + Sync {
+    /// Checks the world without loading chunks or changing inventory state.
+    extern "C" fn is_valid(&self, world: crate::World<'_>) -> bool;
+}
+
+/// Owned access check retained while the storage menu is open.
+pub type DynStorageAccess = stabby::dynptr!(stabby::boxed::Box<dyn StorageAccess + Send + Sync>);
+
 /// One click in a extension menu.
 #[stabby::stabby]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,17 +42,66 @@ pub struct MenuClick {
     pub kind: ClickKind,
 }
 
+/// One slot replacement in an open extension menu.
+#[stabby::stabby]
+pub struct MenuItemUpdate {
+    /// Replacement stack, or an empty item to clear the slot.
+    pub item: ItemSpec,
+    /// Zero-based slot in the extension menu.
+    pub slot: i32,
+}
+
 #[stabby::host_api]
 /// Menu bindings on `Server`.
 pub mod api {
-    use super::MenuClick;
-    use crate::{ApiResult, PlayerId, Server, items::ItemSpec};
+    use super::{DynStorageAccess, MenuClick, MenuItemUpdate};
+    use crate::{
+        ApiResult, BlockPos, PlayerId, Server, block_behavior::types::Player, items::ItemSpec,
+    };
     #[cfg(feature = "host")]
     use stabby::string::String as ApiString;
     use stabby::{str::Str, vec::Vec as ApiVec};
 
     #[cfg(feature = "host")]
     use crate::host::menus as host;
+
+    impl Player<'_> {
+        /// Opens a writable chest backed by the storage block at `pos`.
+        pub fn open_storage(
+            &self,
+            pos: BlockPos,
+            title: Str<'_>,
+            slots: u32,
+            access: DynStorageAccess,
+        ) -> ApiResult<()> {
+            crate::host::storage::open(self.host(), pos, pos, title.as_str(), slots, access)
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Opens a writable chest backed by `core`, with reach measured from
+        /// the interacted block. Pages share one persistent inventory.
+        pub fn open_storage_from(
+            &self,
+            core: BlockPos,
+            interacted: BlockPos,
+            title: Str<'_>,
+            slots: u32,
+            access: DynStorageAccess,
+        ) -> ApiResult<()> {
+            crate::host::storage::open(self.host(), core, interacted, title.as_str(), slots, access)
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Sends a plain system message to the interacting player.
+        pub fn send_message(&self, message: Str<'_>) {
+            self.host()
+                .send_message(&text_components::TextComponent::plain(
+                    message.as_str().to_owned(),
+                ));
+        }
+    }
 
     impl<'a> Server<'a> {
         /// Opens a read-only chest GUI; `callback(server, click, token)` receives every click.
@@ -72,6 +131,19 @@ pub mod api {
         /// Replaces one icon in the player's open extension menu.
         pub fn set_menu_item(&self, player: PlayerId, slot: i32, item: ItemSpec) -> ApiResult<()> {
             host::set_menu_item(self.host(), player, slot, &item)
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Updates several slots in the specified menu. Returns false when the
+        /// player has disconnected, closed that menu, or opened another one.
+        pub fn update_menu(
+            &self,
+            player: PlayerId,
+            menu: u64,
+            updates: ApiVec<MenuItemUpdate>,
+        ) -> ApiResult<bool> {
+            host::update_menu(self.host(), player, menu, &updates)
                 .map_err(ApiString::from)
                 .into()
         }

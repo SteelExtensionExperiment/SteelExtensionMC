@@ -826,6 +826,11 @@ impl ChunkMap {
                         continue;
                     };
 
+                    let visual = crate::player::client_blocks::BlockVisual::live(
+                        &world,
+                        block_pos,
+                        block_state,
+                    );
                     for entity_id in &tracking_players {
                         if let Some(player) = world.players.get_by_entity_id(*entity_id) {
                             let mut sender = player.chunk_sender().lock();
@@ -833,7 +838,7 @@ impl ChunkMap {
                                 continue;
                             }
                             player.connection.send_encoded(encoded.clone());
-                            sender.update_client_block(&player.connection, block_pos, block_state);
+                            sender.update_client_block(&player.connection, &visual);
                         }
                     }
                     world.broadcast_block_entity_if_needed(block_pos);
@@ -861,7 +866,8 @@ impl ChunkMap {
                     let display_updates: Vec<_> = changes
                         .iter()
                         .map(|change| {
-                            (
+                            crate::player::client_blocks::BlockVisual::live(
+                                &world,
                                 section_pos.relative_to_block_pos(change.pos),
                                 change.block_state,
                             )
@@ -888,8 +894,8 @@ impl ChunkMap {
                                 continue;
                             }
                             player.connection.send_encoded(encoded.clone());
-                            for &(pos, state) in &display_updates {
-                                sender.update_client_block(&player.connection, pos, state);
+                            for visual in &display_updates {
+                                sender.update_client_block(&player.connection, visual);
                             }
                         }
                     }

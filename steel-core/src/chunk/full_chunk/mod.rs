@@ -1068,6 +1068,32 @@ impl FullChunkRef<'_> {
         }
     }
 
+    /// Reads a storage decoration without creating or promoting any block entity.
+    pub(crate) fn storage_display(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> Option<Arc<crate::block_entity::StorageDisplay>> {
+        use steel_utils::Downcast as _;
+
+        if !REGISTRY
+            .block_entity_types
+            .is_storage_block(state.get_block())
+        {
+            return None;
+        }
+        let BlockEntityLookup::Concrete(entity) = self.chunk.block_entity_storage().lookup(pos)
+        else {
+            return None;
+        };
+        if entity.is_removed() || !entity.is_valid_block_state(state) {
+            return None;
+        }
+        entity
+            .downcast_ref::<crate::block_entity::StorageBlockEntity>()?
+            .display()
+    }
+
     /// Gets a block entity, creating the live block's implementation when storage is missing.
     ///
     /// This is Vanilla's `EntityCreationType.IMMEDIATE` path used by `Level.getBlockEntity`.
@@ -1928,17 +1954,21 @@ impl FullChunkRef<'_> {
             .block_entity_storage()
             .get_all()
             .iter()
-            .map(|entity| {
+            .filter_map(|entity| {
                 let pos = entity.get_block_pos();
-                let type_id = entity.get_type().id() as i32;
+                let kind = entity.get_type();
+                if REGISTRY.block_entity_types.storage_capacity(kind).is_some() {
+                    return None;
+                }
+                let type_id = kind.id() as i32;
                 let update_tag = entity.get_update_tag();
 
-                BlockEntityInfo {
+                Some(BlockEntityInfo {
                     packed_xz: PackedChunkLocalXZ::from_block_pos(pos),
                     y: pos.0.y as i16,
                     type_id,
                     data: update_tag.into(),
-                }
+                })
             })
             .collect();
 

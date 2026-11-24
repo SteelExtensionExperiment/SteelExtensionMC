@@ -29,7 +29,7 @@ use steel_core::{
     world::World,
 };
 use steel_utils::{Direction, Identifier, types::InteractionHand};
-use text_components::TextComponent;
+use text_components::{NbtValue, TextComponent};
 
 /// Mutable access to a player event, with the server that owns the player.
 pub(crate) struct Access<'a, E> {
@@ -410,7 +410,13 @@ pub(crate) fn subscribe_teleport(
 /// Invalid JSON is shown literally rather than dropped.
 pub(crate) fn parse_text(text: &str) -> TextComponent {
     if text.trim_start().starts_with('{')
-        && let Ok(component) = serde_json::from_str::<TextComponent>(text)
+        && let Some(component) = serde_json::from_str::<TextComponent>(text)
+            .ok()
+            .or_else(|| {
+                // The vanilla component codec accepts RGB strings. The derived Serde model uses a tagged RGB enum.
+                let value = serde_json::from_str::<NbtValue>(text).ok()?;
+                TextComponent::from_nbt(value.as_nbt())
+            })
     {
         return component;
     }

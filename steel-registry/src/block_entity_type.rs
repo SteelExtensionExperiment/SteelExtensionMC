@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use rustc_hash::FxHashMap;
 use steel_utils::Identifier;
 
@@ -28,6 +30,7 @@ pub struct BlockEntityTypeRegistry {
     block_entity_types_by_id: Vec<BlockEntityTypeRef>,
     block_entity_types_by_key: FxHashMap<Identifier, usize>,
     blocks_with_block_entities: Vec<bool>,
+    storage_capacities: FxHashMap<Identifier, NonZeroU32>,
     allows_registering: bool,
 }
 
@@ -38,6 +41,7 @@ impl BlockEntityTypeRegistry {
             block_entity_types_by_id: Vec::new(),
             block_entity_types_by_key: FxHashMap::default(),
             blocks_with_block_entities: Vec::new(),
+            storage_capacities: FxHashMap::default(),
             allows_registering: true,
         }
     }
@@ -71,6 +75,29 @@ impl BlockEntityTypeRegistry {
 
     pub fn iter(&self) -> impl Iterator<Item = (usize, BlockEntityTypeRef)> + '_ {
         self.block_entity_types_by_id.iter().copied().enumerate()
+    }
+
+    /// Registers a server-only storage type under the owning block's key.
+    pub fn register_storage(&mut self, block: BlockRef, slots: NonZeroU32) {
+        let valid_blocks = Box::leak(Box::new([block]));
+        let kind = Box::leak(Box::new(BlockEntityType {
+            key: block.key.clone(),
+            valid_blocks,
+        }));
+        self.register(kind);
+        self.storage_capacities.insert(block.key.clone(), slots);
+    }
+
+    /// Returns the maximum slot count for a server-only storage type.
+    #[must_use]
+    pub fn storage_capacity(&self, kind: BlockEntityTypeRef) -> Option<NonZeroU32> {
+        self.storage_capacities.get(&kind.key).copied()
+    }
+
+    /// Whether this block owns a server-only persistent storage type.
+    #[must_use]
+    pub fn is_storage_block(&self, block: BlockRef) -> bool {
+        self.storage_capacities.contains_key(&block.key)
     }
 
     /// Returns whether at least one block entity type accepts `block`.

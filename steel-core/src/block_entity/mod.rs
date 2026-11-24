@@ -31,6 +31,7 @@ pub mod entities;
 mod randomizable_container;
 mod registry;
 mod storage;
+mod storage_inventory;
 
 use simdnbt::FromNbtTag;
 use simdnbt::borrow::{
@@ -64,6 +65,7 @@ pub(crate) use storage::{
     BlockEntityInsert, BlockEntityLookup, BlockEntityStorage, ClearedBlockEntities,
     DetachedBlockEntity, LifecycleDispatchers,
 };
+pub use storage_inventory::{StorageBlockEntity, StorageDisplay};
 
 use crate::block_entity::entities::Spawner;
 use crate::entity::ContainerUser;

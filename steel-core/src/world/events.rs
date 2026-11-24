@@ -53,7 +53,16 @@ impl World {
         nbt: NbtCompound,
     ) {
         use steel_protocol::packets::game::CBlockEntityData;
+        use steel_registry::REGISTRY;
         use steel_utils::serial::OptionalNbt;
+
+        if REGISTRY
+            .block_entity_types
+            .storage_capacity(block_entity_type)
+            .is_some()
+        {
+            return;
+        }
 
         let chunk = ChunkPos::new(
             SectionPos::block_to_section_coord(pos.x()),

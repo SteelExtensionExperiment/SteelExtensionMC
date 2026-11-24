@@ -19,6 +19,7 @@ pub(crate) mod players;
 pub(crate) mod projectiles;
 pub(crate) mod runtime;
 pub(crate) mod services;
+pub(crate) mod storage;
 pub(crate) mod terrain;
 pub(crate) mod world_effects;
 pub(crate) mod worlds;

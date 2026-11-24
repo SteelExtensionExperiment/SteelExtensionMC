@@ -11,6 +11,7 @@ pub(crate) use fluid::register_fluid;
 #[cfg(test)]
 mod tests;
 
+use std::num::NonZeroU32;
 use std::sync::{Arc, OnceLock};
 
 use glam::{Quat, Vec3};
@@ -196,6 +197,28 @@ pub(crate) fn register_block_item(
     registry.register_block_definition(block, Some(placing))
 }
 
+pub(crate) fn register_storage_block(
+    registry: &mut Registry,
+    definition: BlockItemDefinition,
+    max_slots: u32,
+) -> Result<BlockRef, String> {
+    let slots = NonZeroU32::new(max_slots)
+        .filter(|slots| i32::try_from(slots.get()).is_ok())
+        .ok_or("storage slot count must fit in a positive NBT integer")?;
+    let key = definition
+        .block
+        .key
+        .as_str()
+        .parse::<Identifier>()
+        .map_err(str::to_owned)?;
+    if registry.block_entity_types.by_key(&key).is_some() {
+        return Err(format!("block entity type {key} is already registered"));
+    }
+    let block = register_block_item(registry, definition)?;
+    registry.block_entity_types.register_storage(block, slots);
+    Ok(block)
+}
+
 fn prepare_block_item(
     registry: &Registry,
     definition: BlockItemDefinition,
@@ -313,22 +336,28 @@ fn prepare_displays(
 ) -> Result<Vec<BlockItemDisplay>, String> {
     displays
         .iter()
-        .map(|display| {
-            Ok(BlockItemDisplay {
-                item: appearance_stack(registry, &display.appearance)?,
-                translation: Vec3::from_array(display.translation),
-                scale: Vec3::from_array(display.scale),
-                rotation: Quat::from_array(display.rotation),
-                pack_transform: display.pack_transform.as_ref().map(|transform| {
-                    BlockDisplayTransform {
-                        translation: Vec3::from_array(transform.translation),
-                        scale: Vec3::from_array(transform.scale),
-                        rotation: Quat::from_array(transform.rotation),
-                    }
-                }),
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()
+        .map(|display| prepare_display(registry, display))
+        .collect()
+}
+
+pub(crate) fn prepare_display(
+    registry: &Registry,
+    display: &ItemDisplay,
+) -> Result<BlockItemDisplay, String> {
+    Ok(BlockItemDisplay {
+        item: appearance_stack(registry, &display.appearance)?,
+        translation: Vec3::from_array(display.translation),
+        scale: Vec3::from_array(display.scale),
+        rotation: Quat::from_array(display.rotation),
+        pack_transform: display
+            .pack_transform
+            .as_ref()
+            .map(|transform| BlockDisplayTransform {
+                translation: Vec3::from_array(transform.translation),
+                scale: Vec3::from_array(transform.scale),
+                rotation: Quat::from_array(transform.rotation),
+            }),
+    })
 }
 
 pub(crate) fn register_bed(
