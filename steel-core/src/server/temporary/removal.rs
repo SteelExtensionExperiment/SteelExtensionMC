@@ -169,6 +169,12 @@ impl ServerJob for RemoveWorldJob {
                 .finish(self.id, Err("world was already removed".into()));
             return JobPoll::Finished;
         };
+        server
+            .temporary_worlds
+            .state
+            .lock()
+            .spawn_tickets
+            .remove(&world.key);
         crate::extension::Events::fire_if(&server.events().world_unload, || {
             crate::extension::events::WorldUnloadEvent {
                 world: world.key.clone(),

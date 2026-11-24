@@ -26,7 +26,7 @@ changes are shared by every extension and are serialized by the user (`specs/ext
 
 ## Phase 1: Setup
 
-- [ ] T001 [P] Add the probe extension `steel-extension-api/tests/world-templates-probe/` (own `[workspace]`, `cdylib`, path dependency `../..`, modeled on `tests/event-probe`) exposing one command per new binding, and the native test entry `steel-extension-api/tests/world_templates.rs`, `#[ignore]` until the probe is built. Add the probe's library path next to the `event_probe` special case in `tests/common/mod.rs:220-232`.
+- [x] T001 [P] Add the probe extension `steel-extension-api/tests/world-templates-probe/` (own `[workspace]`, `cdylib`, path dependency `../..`, modeled on `tests/event-probe`) exposing one command per new binding, and the native test entry `steel-extension-api/tests/world_templates.rs`, `#[ignore]` until the probe is built. Add the probe's library path next to the `event_probe` special case in `tests/common/mod.rs:220-232`.
 
 ---
 
@@ -93,7 +93,7 @@ player data survive and no clone does (spec US2).
 
 ## Phase 6: Polish & cross-cutting
 
-- [ ] T019 Complete the native test `steel-extension-api/tests/world_templates.rs` against the probe: build the fixture world in the test (`World::new_with_config` with `WorldStorageConfig::Disk`, `world/mod.rs:360`; set blocks and a chest, add a pig, save), hash the folder, load one good and one missing template, assert one Ready and one Failed; clone into a new temporary domain and into a lasting domain; blocks and chest are present and the pig is not; two clones diverge when one is edited; a caller-held `Operation` is polled to completion; a player is relocated when its world is removed; and the fixture hash is unchanged at the end (SC-004).
+- [x] T019 Complete the native test `steel-extension-api/tests/world_templates.rs` against the probe: build the fixture world in the test (`World::new_with_config` with `WorldStorageConfig::Disk`, `world/mod.rs:360`; set blocks and a chest, add a pig, save), hash the folder, load one good and one missing template, assert one Ready and one Failed; clone into a new temporary domain and into a lasting domain; blocks and chest are present and the pig is not; two clones diverge when one is edited; a caller-held `Operation` is polled to completion; a player is relocated when its world is removed; and the fixture hash is unchanged at the end (SC-004).
 - [ ] T020 [P] Run `cargo clippy -r --workspace --all-targets --all-features`, `cargo fmt --all --check`, `typos` on the touched crates, measure SC-001 to SC-003 and replace the proposed targets with the measured ones, and update `specs/extensions-workflow.md` status.
 
 ---

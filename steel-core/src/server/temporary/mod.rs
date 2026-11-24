@@ -56,13 +56,14 @@ struct State {
     domains: FxHashMap<String, DomainState>,
     /// Keys of worlds being prepared, so a duplicate request fails before preparation.
     pending_worlds: FxHashSet<Identifier>,
+    /// Keeps each runtime world's spawn chunks loaded until the world is removed.
+    spawn_tickets: FxHashMap<Identifier, ChunkRequestHandle>,
 }
 struct DomainState {
     closing: bool,
     creating: usize,
     /// Worlds of this domain whose removal is in progress.
     removing: usize,
-    spawn_tickets: Vec<ChunkRequestHandle>,
 }
 impl TemporaryWorlds {
     pub(super) fn is_closing(&self, domain: &str) -> bool {
@@ -169,7 +170,6 @@ impl Server {
                         closing: false,
                         creating: 1,
                         removing: 0,
-                        spawn_tickets: Vec::new(),
                     },
                 );
             } else if let Some(entry) = state.domains.get_mut(&domain) {
@@ -273,15 +273,13 @@ impl ServerJob for CreateWorldJob {
                 .worlds
                 .publish_runtime_world(Arc::clone(world), placement)?;
             server.fire_world_load(world);
-            if let Some(ticket) = prepared.spawn_ticket.take()
-                && let Some(domain) = server
+            if let Some(ticket) = prepared.spawn_ticket.take() {
+                server
                     .temporary_worlds
                     .state
                     .lock()
-                    .domains
-                    .get_mut(&self.domain)
-            {
-                domain.spawn_tickets.push(ticket);
+                    .spawn_tickets
+                    .insert(key.clone(), ticket);
             }
             prepared.published = true;
             Ok(key)
@@ -375,12 +373,13 @@ impl ServerJob for DestroyDomainJob {
         server
             .player_data_storage
             .retire_temporary_domain(&self.domain);
-        server
-            .temporary_worlds
-            .state
-            .lock()
-            .domains
-            .remove(&self.domain);
+        {
+            let mut state = server.temporary_worlds.state.lock();
+            state.domains.remove(&self.domain);
+            state
+                .spawn_tickets
+                .retain(|key, _| key.namespace.as_ref() != self.domain);
+        }
         let id = self.id;
         let domain = self.domain.clone();
         server.temporary_worlds.cleanup.clone().spawn(async move {

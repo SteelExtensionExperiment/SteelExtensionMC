@@ -46,6 +46,7 @@ use steel_protocol::packets::game::{PlayerAction, SPlayerAction};
 use steel_registry::blocks::properties::Direction;
 use steel_registry::vanilla_game_rules::NATURAL_HEALTH_REGENERATION;
 use steel_registry::{game_profile::GameProfile, vanilla_blocks, vanilla_dimension_types};
+use steel_utils::threading::DEBUG_STACK_SIZE;
 use steel_utils::{
     BlockPos, ChunkPos, Identifier,
     locks::SyncMutex,
@@ -99,6 +100,7 @@ impl Fixture {
         let runtime = Arc::new(
             Builder::new_multi_thread()
                 .worker_threads(2)
+                .thread_stack_size(DEBUG_STACK_SIZE)
                 .enable_all()
                 .build()
                 .map_err(|e| e.to_string())?,
@@ -106,6 +108,7 @@ impl Fixture {
         let pool = Arc::new(
             rayon::ThreadPoolBuilder::new()
                 .num_threads(1)
+                .stack_size(DEBUG_STACK_SIZE)
                 .build()
                 .map_err(|e| e.to_string())?,
         );
@@ -223,6 +226,8 @@ pub fn library(name: &str) -> PathBuf {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let crate_dir = if name == "event_probe" {
         root.join("tests/event-probe")
+    } else if name == "world_templates_probe" {
+        root.join("tests/world-templates-probe")
     } else {
         root.join("../extension-example")
             .join(name.replace('_', "-"))
