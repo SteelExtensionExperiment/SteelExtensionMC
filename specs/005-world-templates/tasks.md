@@ -85,7 +85,7 @@ player data survive and no clone does (spec US2).
 
 - [x] T016 [US3] Add `World::retiring` and extract `World::retire_runtime` in `steel-core/src/world/mod.rs` (from `server/temporary/mod.rs:366-372`); refuse retiring worlds in `world_changes.rs:397-411,507-526`, `jobs/teleport.rs:261-264`, portal resolution and runtime member placement; re-check in `finish_prepared_player_join` (`player_admission.rs:248+`). Tests: each entry point refuses a retiring world.
 - [x] T017 [US3] Add `steel-core/src/server/temporary/removal.rs` with `Server::remove_world` and `RemoveWorldJob` (data-model), `DomainState::removing`, and make `DestroyDomainJob` wait on it. Tests: players move to the domain default, then to the server default; a `worlds.toml` world is refused; removing a temporary domain's first world keeps the domain, `switch_domain` fails and `select_world` works; a world still being created, one already being removed, and a shared clock owner are refused; destroying the domain waits for a removal in progress.
-- [ ] T018 [US3] Add the `remove_world` and `world_is_removable` bindings and adapters. Test: conversions and refusal of `worlds.toml` worlds.
+- [x] T018 [US3] Add the `remove_world` and `world_is_removable` bindings and adapters. Test: conversions and refusal of `worlds.toml` worlds.
 
 **Checkpoint**: the full world lifecycle is available to extensions.
 

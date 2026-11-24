@@ -166,6 +166,21 @@ pub mod api {
             .map_err(ApiString::from)
             .into()
         }
+        /// Starts removing a runtime world. The world refuses new entries at once, its players
+        /// move to the domain default world (else the server default world), and the operation's
+        /// value is the world key once it is retired. A domain keeps existing without a default
+        /// world and then refuses `switch_domain`.
+        pub fn remove_world(&self, key: Str<'_>) -> ApiResult<Operation> {
+            host::remove_world(self.host(), key.as_str())
+                .map_err(ApiString::from)
+                .into()
+        }
+        /// Whether `remove_world` would accept the key now: a runtime world that is not being
+        /// removed, not in a closing domain and not the clock of other worlds.
+        #[must_use]
+        pub fn world_is_removable(&self, key: Str<'_>) -> bool {
+            host::world_is_removable(self.host(), key.as_str())
+        }
         /// Reads an operation, consuming its result when complete.
         pub fn operation_status(&self, operation: Operation) -> ApiResult<OperationStatus> {
             host::operation_status(self.host(), operation)

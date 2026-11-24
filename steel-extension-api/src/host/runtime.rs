@@ -185,6 +185,14 @@ pub(crate) fn clone_world(
         )
         .map(|id| Operation { id: id.0 })
 }
+pub(crate) fn remove_world(server: &Arc<CoreServer>, name: &str) -> Result<Operation, String> {
+    server
+        .remove_world(&key(name)?)
+        .map(|id| Operation { id: id.0 })
+}
+pub(crate) fn world_is_removable(server: &CoreServer, name: &str) -> bool {
+    key(name).is_ok_and(|key| server.world_is_removable(&key))
+}
 pub(crate) fn operation_status(
     server: &CoreServer,
     operation: Operation,
