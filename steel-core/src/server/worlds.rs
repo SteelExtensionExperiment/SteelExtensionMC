@@ -195,6 +195,27 @@ impl WorldMap {
         Self::insert_into(&mut state, world.key.clone(), world);
         Ok(())
     }
+    /// Removes one runtime world from the map and every index that refers to it. A domain whose
+    /// default world this was stays registered without a default world.
+    pub(crate) fn remove_runtime_world(&self, key: &Identifier) -> Option<Arc<World>> {
+        let mut state = self.state.write();
+        if !state.runtime_worlds.remove(key) {
+            return None;
+        }
+        let world = state.worlds.remove(key)?;
+        if let Some(directory) = state.entity_directories.get(world.domain()) {
+            directory.remove_world(&world);
+        }
+        state.nether_portal_targets.remove(key);
+        state.end_portal_targets.remove(key);
+        state.clock_owners.retain(|owner| owner != key);
+        if let Some(entry) = state.domains.get_mut(world.domain())
+            && entry.default_world.as_ref() == Some(key)
+        {
+            entry.default_world = None;
+        }
+        Some(world)
+    }
     pub(crate) fn remove_temporary_domain(&self, domain: &str) -> Vec<Arc<World>> {
         let mut state = self.state.write();
         let keys: Vec<_> = state

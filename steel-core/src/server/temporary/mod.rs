@@ -15,6 +15,7 @@ use tokio::task::JoinHandle;
 use tokio_util::task::TaskTracker;
 mod clone;
 mod preparation;
+mod removal;
 mod request;
 pub use clone::CloneOverrides;
 use preparation::PreparedWorld;
@@ -59,6 +60,8 @@ struct State {
 struct DomainState {
     closing: bool,
     creating: usize,
+    /// Worlds of this domain whose removal is in progress.
+    removing: usize,
     spawn_tickets: Vec<ChunkRequestHandle>,
 }
 impl TemporaryWorlds {
@@ -165,6 +168,7 @@ impl Server {
                     DomainState {
                         closing: false,
                         creating: 1,
+                        removing: 0,
                         spawn_tickets: Vec::new(),
                     },
                 );
@@ -338,7 +342,7 @@ impl ServerJob for DestroyDomainJob {
             .lock()
             .domains
             .get(&self.domain)
-            .is_some_and(|d| d.creating != 0);
+            .is_some_and(|d| d.creating != 0 || d.removing != 0);
         if creating
             || server
                 .get_players()
