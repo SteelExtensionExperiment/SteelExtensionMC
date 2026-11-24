@@ -236,6 +236,10 @@ pub fn test_detach_player(server: &Server, player: &Arc<Player>) {
 ///
 /// Used by Steel tests and by the Flint test adapter.
 #[cfg(any(test, feature = "test-framework"))]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one struct literal initializes every server field"
+)]
 pub async fn test_server_with_worlds_and_config(
     default_domain: String,
     domains: &[ResolvedDomainConfig],

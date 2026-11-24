@@ -82,6 +82,43 @@ impl Server {
     ) -> Result<WorldOperationId, String> {
         self.create_runtime_world(request.into())
     }
+    /// The clock a new world runs on and the loot random sequences it shares.
+    fn clock_and_sequences(
+        &self,
+        request: &RuntimeWorldRequest,
+        domain: &str,
+    ) -> Result<(GameTimeSource, Arc<RandomSequences>), String> {
+        Ok(match request.target {
+            DomainTarget::NewTemporary => (
+                GameTimeSource::Primary,
+                Arc::new(RandomSequences::new(request.seed)),
+            ),
+            DomainTarget::TemporarySibling | DomainTarget::Existing => {
+                if !self.worlds.has_domain(domain) {
+                    return Err(format!("domain {domain} is not loaded"));
+                }
+                // A temporary domain keeps its loot random sequences on its default world, so a
+                // domain whose default world was removed cannot take new worlds.
+                let default = self.worlds.default_world(domain).ok_or_else(|| {
+                    format!(
+                        "domain {domain} has no default world, so it has no loot random sequences to share"
+                    )
+                })?;
+                let sequences = default
+                    .random_sequences
+                    .read()
+                    .as_ref()
+                    .map(Arc::clone)
+                    .ok_or("domain has no loot random sequences")?;
+                let clock = if request.target == DomainTarget::Existing {
+                    GameTimeSource::Primary
+                } else {
+                    GameTimeSource::Derived(Arc::clone(&default.game_time))
+                };
+                (clock, sequences)
+            }
+        })
+    }
     /// Starts preparing a RAM-only runtime world. The operation publishes it at a tick boundary.
     ///
     /// # Errors
@@ -110,36 +147,7 @@ impl Server {
         if !(dimension.min_y..dimension.min_y + dimension.height).contains(&request.spawn.y()) {
             return Err("spawn is outside the dimension build height".into());
         }
-        let (game_time_source, random_sequences) = match request.target {
-            DomainTarget::NewTemporary => (
-                GameTimeSource::Primary,
-                Arc::new(RandomSequences::new(request.seed)),
-            ),
-            DomainTarget::TemporarySibling | DomainTarget::Existing => {
-                if !self.worlds.has_domain(&domain) {
-                    return Err(format!("domain {domain} is not loaded"));
-                }
-                // A temporary domain keeps its loot random sequences on its default world, so a
-                // domain whose default world was removed cannot take new worlds.
-                let default = self.worlds.default_world(&domain).ok_or_else(|| {
-                    format!(
-                        "domain {domain} has no default world, so it has no loot random sequences to share"
-                    )
-                })?;
-                let sequences = default
-                    .random_sequences
-                    .read()
-                    .as_ref()
-                    .map(Arc::clone)
-                    .ok_or("domain has no loot random sequences")?;
-                let clock = if request.target == DomainTarget::Existing {
-                    GameTimeSource::Primary
-                } else {
-                    GameTimeSource::Derived(Arc::clone(&default.game_time))
-                };
-                (clock, sequences)
-            }
-        };
+        let (game_time_source, random_sequences) = self.clock_and_sequences(&request, &domain)?;
         let id = {
             let mut state = self.temporary_worlds.state.lock();
             if state.pending_worlds.contains(&request.key) {

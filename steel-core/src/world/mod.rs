@@ -94,7 +94,7 @@ use crate::{
     behavior::{BLOCK_BEHAVIORS, BlockCollisionContext, BlockLootContext, FLUID_BEHAVIORS},
     block_entity::{BlockEntity, SharedBlockEntity, entities::EndGatewayBlockEntity},
     chunk::{heightmap::HeightmapType, player_chunk_view::PlayerChunkView},
-    chunk_saver::{ChunkStorage, RamOnlyStorage, RegionManager},
+    chunk_saver::ChunkStorage,
     entity::{
         AddEntityError, Entity, EntityChangeSenders, EntityChunkCallback, EntityLifecycleChanges,
         EntityMovementSyncPacket, EntityOwnership, EntityTracker, EntityVisibility,
@@ -417,17 +417,7 @@ impl World {
         let sea_level = config.sea_level;
         let default_gamemode = config.default_gamemode;
         // Create storage backend based on config
-        let storage: Arc<ChunkStorage> = match &config.storage {
-            WorldStorageConfig::Disk { path } => {
-                Arc::new(ChunkStorage::Disk(RegionManager::new(path.clone())))
-            }
-            WorldStorageConfig::RamOnly => {
-                Arc::new(ChunkStorage::RamOnly(RamOnlyStorage::empty_world()))
-            }
-            WorldStorageConfig::RamClone { template } => Arc::new(ChunkStorage::RamOnly(
-                RamOnlyStorage::from_template(Arc::clone(template)),
-            )),
-        };
+        let storage = ChunkStorage::from_config(&config.storage);
 
         // Create or skip level data based on config
 

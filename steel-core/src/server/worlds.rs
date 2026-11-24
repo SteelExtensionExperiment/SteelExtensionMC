@@ -403,6 +403,7 @@ fn end_entry_portal_target_world_name(source: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::{WorldMap, end_entry_portal_target_world_name, nether_portal_target_world_name};
+    use std::sync::Arc;
 
     fn runtime_map(domain: &'static str) -> (WorldMap, crate::test_support::TestWorld) {
         use crate::config::ResolvedDomainConfig;
@@ -418,7 +419,7 @@ mod tests {
         let mut worlds = WorldMap::new(domain.to_owned(), &[config], &[]);
         worlds.insert(
             Identifier::new_static(domain, "overworld"),
-            default.world.clone(),
+            Arc::clone(&default.world),
         );
         (worlds, default)
     }
@@ -431,7 +432,7 @@ mod tests {
         let (worlds, default) = runtime_map("own_clock");
         let member = fresh_test_world_in_domain("own_clock", "clone");
         worlds
-            .publish_runtime_world(member.world.clone(), RuntimePlacement::Member)
+            .publish_runtime_world(Arc::clone(&member.world), RuntimePlacement::Member)
             .expect("a member may own its clock");
         let member_before = member.world.game_time.ticks();
         let default_before = default.world.game_time.ticks();
@@ -441,7 +442,7 @@ mod tests {
 
         assert_eq!(member.world.game_time.ticks(), member_before + 2);
         assert_eq!(default.world.game_time.ticks(), default_before + 2);
-        assert!(!std::sync::Arc::ptr_eq(
+        assert!(!Arc::ptr_eq(
             &member.world.game_time,
             &default.world.game_time
         ));
@@ -455,7 +456,7 @@ mod tests {
         let (worlds, _default) = runtime_map("no_default");
         let member = fresh_test_world_in_domain("no_default", "clone");
         worlds
-            .publish_runtime_world(member.world.clone(), RuntimePlacement::Member)
+            .publish_runtime_world(Arc::clone(&member.world), RuntimePlacement::Member)
             .expect("member publishes");
         worlds
             .state
@@ -481,14 +482,14 @@ mod tests {
         let (worlds, default) = runtime_map("derived_clock");
         let sibling = fresh_test_derived_world(&default.world, "sibling");
         worlds
-            .publish_runtime_world(sibling.world.clone(), RuntimePlacement::Member)
+            .publish_runtime_world(Arc::clone(&sibling.world), RuntimePlacement::Member)
             .expect("a derived sibling shares the default clock");
 
         let other_primary = fresh_test_world_in_domain("derived_clock", "other_primary");
         let stranger = fresh_test_derived_world(&other_primary.world, "stranger");
         assert!(
             worlds
-                .publish_runtime_world(stranger.world.clone(), RuntimePlacement::Member)
+                .publish_runtime_world(Arc::clone(&stranger.world), RuntimePlacement::Member)
                 .is_err(),
             "a derived world of another clock is refused"
         );
@@ -509,8 +510,11 @@ mod tests {
             worlds: vec![default.world.key.clone(), clock_owner.world.key.clone()],
         };
         let mut worlds = WorldMap::new("saved_targets".to_owned(), &[domain], &[]);
-        worlds.insert(clock_owner.world.key.clone(), clock_owner.world.clone());
-        worlds.insert(default.world.key.clone(), default.world.clone());
+        worlds.insert(
+            clock_owner.world.key.clone(),
+            Arc::clone(&clock_owner.world),
+        );
+        worlds.insert(default.world.key.clone(), Arc::clone(&default.world));
 
         let targets = worlds.domain_default_worlds();
 
@@ -525,7 +529,6 @@ mod tests {
             fresh_test_derived_world, fresh_test_world_in_domain, insert_ready_full_chunk,
         };
         use glam::DVec3;
-        use std::sync::Arc;
         use steel_registry::vanilla_entities;
         use steel_utils::ChunkPos;
 
