@@ -46,8 +46,8 @@ const ENERGY_BOTTOM_SLOT: i16 = 36;
 const LAST_PROGRESS_SLOT: i16 = 23;
 const STATUS_SLOT: i16 = 47;
 const CLOSE_SLOT: i16 = 53;
-const START_MODEL: &str = "ui-demo:ui/furnace/start-flame";
-const REACTOR_FONT: &str = "ui-demo:ui/reactor";
+const START_MODEL: &str = "steel-ui-demo:ui/furnace/start-flame";
+const REACTOR_FONT: &str = "steel-ui-demo:ui/reactor";
 const REACTOR_RUN_EDGE: i16 = 32;
 const REACTOR_CLOSE: i16 = 7;
 const REACTOR_OUTPUT: i16 = 15;
@@ -66,33 +66,34 @@ fn ui_demos_animate_and_route_buttons_with_both_pack_modes() -> Result<(), Strin
     )?;
     assert_eq!(loaded.order, ["steel-ui", "steel-ui-demo"]);
     let assets = REGISTRY.client_content.resource_pack();
+    assert!(assets.files().any(|(path, _)| {
+        path == "assets/steel-ui-demo/textures/item/ui/furnace/start-flame.png"
+    }));
     assert!(
         assets
             .files()
-            .any(|(path, _)| { path == "assets/ui-demo/textures/item/ui/furnace/start-flame.png" })
-    );
-    assert!(
-        assets
-            .files()
-            .any(|(path, _)| { path == "assets/ui-demo/items/ui/furnace/energy-pulse.json" })
+            .any(|(path, _)| { path == "assets/steel-ui-demo/items/ui/furnace/energy-pulse.json" })
     );
     let font = assets
         .files()
-        .find(|(path, _)| *path == "assets/ui-demo/font/ui/reactor.json")
+        .find(|(path, _)| *path == "assets/steel-ui-demo/font/ui/reactor.json")
         .ok_or("reactor font was not registered")?;
     let font: serde_json::Value =
         serde_json::from_slice(font.1).map_err(|error| error.to_string())?;
     assert_eq!(font["providers"][0]["advances"]["\u{e000}"], -8);
-    assert_eq!(font["providers"][1]["file"], "ui-demo:gui/ui/reactor.png");
+    assert_eq!(
+        font["providers"][1]["file"],
+        "steel-ui-demo:gui/ui/reactor.png"
+    );
     assert_eq!(font["providers"][1]["chars"][0], "\u{e001}");
     assert!(
         assets
             .files()
-            .any(|(path, _)| path == "assets/ui-demo/textures/gui/ui/reactor.png")
+            .any(|(path, _)| path == "assets/steel-ui-demo/textures/gui/ui/reactor.png")
     );
     for gauge in ["energy-fill", "heat-fill"] {
         for level in [1, GAUGE_LEVELS] {
-            let path = format!("assets/ui-demo/items/ui/reactor/{gauge}-{level}.json");
+            let path = format!("assets/steel-ui-demo/items/ui/reactor/{gauge}-{level}.json");
             let (_, definition) = assets
                 .files()
                 .find(|(candidate, _)| *candidate == path)
@@ -100,7 +101,8 @@ fn ui_demos_animate_and_route_buttons_with_both_pack_modes() -> Result<(), Strin
             let definition: serde_json::Value =
                 serde_json::from_slice(definition).map_err(|error| error.to_string())?;
             assert_eq!(definition["oversized_in_gui"], true);
-            let model_path = format!("assets/ui-demo/models/item/ui/reactor/{gauge}-{level}.json");
+            let model_path =
+                format!("assets/steel-ui-demo/models/item/ui/reactor/{gauge}-{level}.json");
             let (_, model) = assets
                 .files()
                 .find(|(candidate, _)| *candidate == model_path)
@@ -109,7 +111,7 @@ fn ui_demos_animate_and_route_buttons_with_both_pack_modes() -> Result<(), Strin
                 serde_json::from_slice(model).map_err(|error| error.to_string())?;
             assert_eq!(
                 model["textures"]["fill"],
-                format!("ui-demo:item/ui/reactor/{gauge}")
+                format!("steel-ui-demo:item/ui/reactor/{gauge}")
             );
             assert_eq!(
                 model["elements"][0]["faces"]["north"]["uv"],
@@ -276,7 +278,7 @@ async fn check_gauge_frames(
         if next_level <= GAUGE_LEVELS
             && let Some(item) = read_slot_update(packet, container, slot)
         {
-            let model = format!("ui-demo:ui/reactor/{name}-{next_level}");
+            let model = format!("steel-ui-demo:ui/reactor/{name}-{next_level}");
             if item
                 .get(ITEM_MODEL)
                 .is_some_and(|key| key.to_string() == model)
@@ -427,7 +429,7 @@ async fn check_screen(running: &common::Running) -> Result<(), String> {
     )
     .await?;
     for style in ["energy-pulse", "energy-on", "energy-off"] {
-        let model = format!("ui-demo:ui/furnace/{style}");
+        let model = format!("steel-ui-demo:ui/furnace/{style}");
         common::until(player, style, || {
             slot_update(running, container, ENERGY_BOTTOM_SLOT, true, |item| {
                 item.get(ITEM_MODEL)

@@ -38,7 +38,18 @@ pub mod api {
         /// This extension's TOML configuration.
         #[must_use]
         pub fn config(&self) -> ApiString {
-            self.host().config.into()
+            self.host().extension.config.as_str().into()
+        }
+
+        /// Reserves a local menu ID and returns its extension-owned asset prefix.
+        /// Call before registering the menu's generated assets.
+        pub fn claim_menu_assets(&mut self, id: Str<'_>) -> ApiResult<ApiString> {
+            self.host()
+                .extension
+                .claim_menu_assets(id.as_str())
+                .map(ApiString::from)
+                .map_err(ApiString::from)
+                .into()
         }
 
         /// Adds a namespaced asset under `assets/` to the combined server pack.

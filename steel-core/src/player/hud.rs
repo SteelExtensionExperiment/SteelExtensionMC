@@ -2,12 +2,15 @@
 //! Sources publish independent sections and local boss-bar identities; owner policy
 //! controls the combined display. State survives respawns on `PlayerSession`.
 
+mod action_bar;
 pub mod catalog;
 mod composition;
 mod expression;
 mod ownership;
 
-pub use composition::{BarContribution, BossBarPolicy, HudPolicy, SidebarSection, TabSection};
+pub use composition::{
+    BarContribution, BossBarPolicy, HudPolicy, HudTemplate, SidebarSection, TabSection,
+};
 
 use rustc_hash::FxHashMap;
 use steel_protocol::packets::game::{
@@ -60,11 +63,12 @@ struct Sidebar {
 /// HUD state of one client connection.
 #[derive(Debug, Default)]
 pub struct PlayerHud {
-    rendered_revision: Option<(u64, u64)>,
+    rendered_revision: Option<(u64, u64, bool)>,
     composition: composition::Composition,
     sidebar: Option<Sidebar>,
     boss_bars: FxHashMap<Uuid, BossBar>,
     tab_list: Option<(TextComponent, TextComponent)>,
+    action_bar: action_bar::ActionBar,
 }
 
 fn line_owner(index: usize) -> String {

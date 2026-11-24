@@ -207,7 +207,7 @@ impl From<String> for Text {
     }
 }
 
-fn write_string(out: &mut String, value: &str) {
+pub(crate) fn write_string(out: &mut String, value: &str) {
     out.push('"');
     for character in value.chars() {
         match character {

@@ -1,7 +1,10 @@
 //! Player helpers for sending client-side title displays.
 
-use steel_protocol::packets::game::{
-    CClearTitles, CSetActionBarText, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation,
+use steel_protocol::{
+    packet_traits::ClientPacket,
+    packets::game::{
+        CClearTitles, CSetActionBarText, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation,
+    },
 };
 use text_components::TextComponent;
 
@@ -20,7 +23,13 @@ impl Player {
 
     /// Sends action-bar text to the player.
     pub fn send_action_bar(&self, text: impl Into<TextComponent>) {
-        self.send_packet(CSetActionBarText::new(text));
+        self.send_transient_overlay(CSetActionBarText::new(text));
+    }
+
+    pub(super) fn send_transient_overlay(&self, packet: impl ClientPacket) {
+        let _dispatch = self.session.hud_dispatch.lock();
+        self.defer_hud_action_bar();
+        self.send_packet(packet);
     }
 
     /// Sets title animation durations in client ticks.

@@ -1,12 +1,13 @@
 //! Owner-bound mutation and reconciliation of the connection's HUD.
 
 use crate::entity::Entity;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
+use steel_protocol::packets::game::CSetActionBarText;
 use text_components::TextComponent;
 use uuid::Uuid;
 
 use super::{
-    BarContribution, HudPacket, PlayerHud, SidebarSection, TabSection,
+    BarContribution, HudPacket, HudTemplate, PlayerHud, SidebarSection, TabSection,
     catalog::HudSource,
     composition::{HudPolicy, OwnedBar},
 };
@@ -19,19 +20,20 @@ impl PlayerHud {
         data: &CustomData,
         policy: &HudPolicy,
     ) -> (Vec<HudPacket>, Vec<String>) {
-        self.reconcile(data, policy)
+        self.reconcile(data, policy, false)
     }
     fn reconcile(
         &mut self,
         data: &CustomData,
         policy: &HudPolicy,
+        uses_pack: bool,
     ) -> (Vec<HudPacket>, Vec<String>) {
-        let revision = (data.revision(), super::catalog::revision());
+        let revision = (data.revision(), super::catalog::revision(), uses_pack);
         if self.rendered_revision == Some(revision) {
             return (Vec::new(), self.composition.errors.clone());
         }
         self.rendered_revision = Some(revision);
-        let desired = self.composition.render(data, policy);
+        let desired = self.composition.render(data, policy, uses_pack);
         let mut packets = Vec::new();
         let mut errors = Vec::new();
         match desired.sidebar {
@@ -46,6 +48,10 @@ impl PlayerHud {
                     self.tab_list = Some(pair);
                 }
             }
+            Err(error) => errors.push(error),
+        }
+        match desired.action_bar {
+            Ok(action_bar) => self.action_bar.desired = action_bar,
             Err(error) => errors.push(error),
         }
         let removed: Vec<_> = self
@@ -83,16 +89,47 @@ impl Player {
     /// Renders owned contributions from current-domain data; failed surfaces keep their last valid state.
     pub fn refresh_hud(&self) -> Result<(), String> {
         let _dispatch = self.session.hud_dispatch.lock();
-        let (packets, errors) = {
+        let (packets, errors, action_bar) = {
             let data = self.data();
-            self.session.hud.lock().reconcile(&data, &self.config.hud)
+            let mut hud = self.session.hud.lock();
+            let (packets, errors) = hud.reconcile(
+                &data,
+                &self.config.hud,
+                self.connection.uses_resource_pack(),
+            );
+            (packets, errors, hud.action_bar.update(Instant::now()))
         };
         self.send_hud(packets);
+        if let Some(text) = action_bar {
+            self.send_packet(CSetActionBarText::new(text));
+        }
         if errors.is_empty() {
             Ok(())
         } else {
             Err(errors.join("; "))
         }
+    }
+
+    /// Publishes or removes this source's persistent action-bar template.
+    pub fn set_hud_action_bar(
+        &self,
+        source: &Arc<HudSource>,
+        template: Option<HudTemplate>,
+    ) -> Result<(), String> {
+        {
+            let mut hud = self.session.hud.lock();
+            hud.rendered_revision = None;
+            hud.composition
+                .sources
+                .entry(source.key.clone())
+                .or_default()
+                .action_bar = template;
+        }
+        self.refresh_hud()
+    }
+
+    pub(in crate::player) fn defer_hud_action_bar(&self) {
+        self.session.hud.lock().action_bar.defer(Instant::now());
     }
 
     /// Replaces only this source's sidebar section.

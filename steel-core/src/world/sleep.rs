@@ -1,4 +1,3 @@
-use steel_protocol::packets::game::CSystemChat;
 use steel_registry::vanilla_game_rules::{
     ADVANCE_TIME, ADVANCE_WEATHER, PLAYERS_SLEEPING_PERCENTAGE,
 };
@@ -68,7 +67,10 @@ impl World {
             .component()
         };
 
-        self.broadcast_to_all_with(|player| CSystemChat::new(&message, true, player));
+        self.players.iter_players(|_, player| {
+            player.send_overlay_message(&message);
+            true
+        });
     }
 
     pub(super) fn tick_sleeping_players(&self) {

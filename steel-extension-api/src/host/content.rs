@@ -55,7 +55,7 @@ type BlockBehaviorFactory = extern "C" fn(
 
 pub(crate) struct ContentRegistration<'a> {
     pub registry: &'a mut Registry,
-    pub config: &'a str,
+    pub extension: &'a ExtensionState,
     block_behaviors: &'a mut Vec<(BlockRef, BlockBehaviorFactory)>,
 }
 
@@ -100,7 +100,7 @@ fn register_content(
     let mut block_behaviors = Vec::new();
     let mut registration = ContentRegistration {
         registry,
-        config: &extension.config,
+        extension,
         block_behaviors: &mut block_behaviors,
     };
     callback(ContentRegistry::from_host(&mut registration)).match_owned(Ok, Err)?;

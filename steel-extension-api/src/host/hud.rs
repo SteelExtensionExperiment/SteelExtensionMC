@@ -2,7 +2,7 @@
 use super::{events::parse_text, players::find};
 use crate::{
     PlayerId,
-    hud::{BarColor, BarStyle, BossBar, Source},
+    hud::{BarColor, BarStyle, BossBar, HudText, Source},
     players::Uuid,
 };
 use stabby::{string::String as ApiString, vec::Vec as ApiVec};
@@ -35,6 +35,18 @@ const fn uuid(id: Uuid) -> uuid::Uuid {
     uuid::Uuid::from_bytes(id.bytes)
 }
 
+impl From<&HudText> for hud::HudTemplate {
+    fn from(template: &HudText) -> Self {
+        match template.packed.as_ref() {
+            Some(packed) => Self::WithPack {
+                vanilla: template.vanilla.to_string(),
+                packed: packed.to_string(),
+            },
+            None => template.vanilla.as_str().into(),
+        }
+    }
+}
+
 pub(crate) fn set_sidebar(
     server: &CoreServer,
     owner: Source,
@@ -45,8 +57,24 @@ pub(crate) fn set_sidebar(
     find(server, id)?.set_hud_sidebar(
         &hud::catalog::source(owner.id)?,
         Some(hud::SidebarSection {
-            title: title.to_owned(),
-            lines: lines.iter().map(ToString::to_string).collect(),
+            title: title.into(),
+            lines: lines.iter().map(|line| line.as_str().into()).collect(),
+        }),
+    )
+}
+
+pub(crate) fn set_sidebar_with_pack(
+    server: &CoreServer,
+    owner: Source,
+    id: PlayerId,
+    title: &HudText,
+    lines: &[HudText],
+) -> Result<(), String> {
+    find(server, id)?.set_hud_sidebar(
+        &hud::catalog::source(owner.id)?,
+        Some(hud::SidebarSection {
+            title: title.into(),
+            lines: lines.iter().map(Into::into).collect(),
         }),
     )
 }
@@ -66,14 +94,22 @@ pub(crate) fn set_boss_bar(
     bar_id: Uuid,
     bar: &BossBar,
     gauge: Option<&str>,
+    packed_title: Option<&str>,
 ) -> Result<(), String> {
+    let title = match packed_title {
+        Some(packed) => hud::HudTemplate::WithPack {
+            vanilla: bar.title.to_string(),
+            packed: packed.to_owned(),
+        },
+        None => bar.title.as_str().into(),
+    };
     let flags =
         u8::from(bar.darken_screen) | u8::from(bar.boss_music) << 1 | u8::from(bar.fog) << 2;
     find(server, id)?.set_hud_bar(
         &hud::catalog::source(owner.id)?,
         uuid(bar_id),
         Some(hud::BarContribution {
-            title: bar.title.to_string(),
+            title,
             gauge: gauge.map(str::to_owned),
             bar: hud::BossBar {
                 title: parse_text(bar.title.as_str()),
@@ -105,8 +141,24 @@ pub(crate) fn set_tab_list(
     find(server, id)?.set_hud_tab(
         &hud::catalog::source(owner.id)?,
         Some(hud::TabSection {
-            header: header.to_owned(),
-            footer: footer.to_owned(),
+            header: header.into(),
+            footer: footer.into(),
+        }),
+    )
+}
+
+pub(crate) fn set_tab_list_with_pack(
+    server: &CoreServer,
+    owner: Source,
+    id: PlayerId,
+    header: &HudText,
+    footer: &HudText,
+) -> Result<(), String> {
+    find(server, id)?.set_hud_tab(
+        &hud::catalog::source(owner.id)?,
+        Some(hud::TabSection {
+            header: header.into(),
+            footer: footer.into(),
         }),
     )
 }
@@ -117,6 +169,15 @@ pub(crate) fn clear_tab_list(
     id: PlayerId,
 ) -> Result<(), String> {
     find(server, id)?.set_hud_tab(&hud::catalog::source(owner.id)?, None)
+}
+
+pub(crate) fn set_action_bar(
+    server: &CoreServer,
+    owner: Source,
+    id: PlayerId,
+    template: Option<&HudText>,
+) -> Result<(), String> {
+    find(server, id)?.set_hud_action_bar(&hud::catalog::source(owner.id)?, template.map(Into::into))
 }
 
 pub(crate) fn source(owner: &str, key: &str) -> Result<Source, String> {

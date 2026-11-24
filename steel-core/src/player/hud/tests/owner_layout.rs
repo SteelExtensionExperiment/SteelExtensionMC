@@ -1,5 +1,5 @@
 use super::*;
-use text_components::format::Color;
+use text_components::{Modifier, format::Color};
 use toml::de::Error as TomlError;
 
 #[test]
@@ -52,18 +52,22 @@ fn owner_configuration_combines_independent_data_and_replaces_default_sections()
         .iter()
         .map(|line| line.to_plain(&DisplayResolutor))
         .collect();
-    assert_eq!(
-        plain,
-        [
-            "Mana: 25/100",
-            &format!("{}{}", "█".repeat(5), "░".repeat(15)),
-            "Moss: 3/12 HP"
-        ]
-    );
-    assert_eq!(sidebar.lines[1].format.color, Some(Color::Blue));
+    assert_eq!(plain, ["Moss: 3/12 HP"]);
+    assert_eq!(sidebar.lines[0].format.color, Some(Color::Gold));
     let (header, footer) = hud.tab_list.as_ref().ok_or("configured tab missing")?;
     assert_eq!(header.to_plain(&DisplayResolutor), "Moss · Mana 25/100");
-    assert_eq!(footer.to_plain(&DisplayResolutor), plain[1]);
+    assert_eq!(footer.to_plain(&DisplayResolutor), "█████░░░░░░░░░░░░░░░");
+
+    let packed = hud.composition.render(&data, &policy, true);
+    let packed_sidebar = packed.sidebar?.ok_or("configured packed sidebar missing")?;
+    let packed_meter = TextComponent::plain("█████░░░░░░░░░░░░░░░")
+        .font("magic:hud/mana")
+        .color(Color::White);
+    assert_eq!(
+        packed_sidebar.lines[0].to_plain(&DisplayResolutor),
+        "Moss: 3/12 HP █░░░░"
+    );
+    assert_eq!(packed.tab?.1, packed_meter);
 
     data.set(
         &DataPath::parse("magic:state/mana/current")?,
@@ -76,27 +80,18 @@ fn owner_configuration_combines_independent_data_and_replaces_default_sections()
         "data changes must refresh the configured HUD"
     );
     let sidebar = hud.sidebar.as_ref().ok_or("updated sidebar missing")?;
-    assert_eq!(sidebar.lines[0].to_plain(&DisplayResolutor), "Mana: 50/100");
     assert_eq!(
-        sidebar.lines[1].to_plain(&DisplayResolutor),
-        "█".repeat(10) + &"░".repeat(10)
-    );
-    assert_eq!(
-        sidebar.lines[2].to_plain(&DisplayResolutor),
+        sidebar.lines[0].to_plain(&DisplayResolutor),
         "Moss: 3/12 HP"
     );
+    let (header, footer) = hud.tab_list.as_ref().ok_or("updated tab missing")?;
+    assert_eq!(header.to_plain(&DisplayResolutor), "Moss · Mana 50/100");
+    assert_eq!(footer.to_plain(&DisplayResolutor), "██████████░░░░░░░░░░");
 
     data.remove(&DataPath::parse("creatures:state/party/0")?);
     let (_, errors) = hud.reconcile_for_test(&data, &policy);
     assert!(errors.is_empty(), "{errors:?}");
-    assert_eq!(
-        hud.sidebar
-            .as_ref()
-            .ok_or("mana sidebar missing")?
-            .lines
-            .len(),
-        2
-    );
+    assert!(hud.sidebar.is_none());
     assert_eq!(
         hud.tab_list
             .as_ref()
