@@ -3,6 +3,7 @@ use crate::BlockPos;
 use stabby::{option::Option as StableOption, string::String as ApiString};
 #[cfg(feature = "host")]
 use steel_core::entity::entities::BillboardConstraints;
+#[cfg(feature = "host")]
 use steel_core::server::temporary::{CloneOverrides, DomainTarget};
 #[cfg(feature = "host")]
 use steel_utils::{
