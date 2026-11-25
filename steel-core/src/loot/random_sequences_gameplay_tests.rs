@@ -34,7 +34,7 @@ fn mob_death_loot_continues_across_worlds_and_explicit_seeds_bypass_the_sequence
     let sequence = table.random_sequence.as_ref().expect("named sequence");
     let source = DamageSource::environment(&vanilla_damage_types::GENERIC);
     let position = DVec3::new(8.5, 64.0, 8.5);
-    for world in [primary, nether] {
+    for world in [&primary, &nether] {
         insert_ready_full_chunk(world, ChunkPos::from_entity_pos(position));
         for seed in [42, 0, -17, 0, 0] {
             let pig = PigEntity::new(

@@ -178,12 +178,10 @@ fn zero_seed_barrels_share_the_named_stream_for_generation_and_placement() {
         .expect("settings");
         let table = &vanilla_loot_tables::CHESTS_SPAWN_BONUS_CHEST;
         let sequence = table.random_sequence.as_ref().expect("named sequence");
-        for world in [
-            primary,
-            worlds
-                .get(&Identifier::new_static("barrel_sequences", "nether"))
-                .expect("nether"),
-        ] {
+        let nether = worlds
+            .get(&Identifier::new_static("barrel_sequences", "nether"))
+            .expect("nether");
+        for world in [&primary, &nether] {
             let barrel = BarrelBlockEntity::new(
                 Arc::downgrade(world),
                 BlockPos::new(1, 64, 1),
@@ -211,7 +209,7 @@ fn zero_seed_barrels_share_the_named_stream_for_generation_and_placement() {
             );
             drop(guard);
         }
-        let actual = bound(primary);
+        let actual = bound(&primary);
         assert_eq!(draw(&actual, sequence), draw(&expected, sequence));
     });
 }
@@ -237,7 +235,7 @@ fn advancement_rewards_continue_the_named_loot_stream() {
     let world = worlds
         .default_world("advancement_sequences")
         .expect("world");
-    let player = TestPlayerBuilder::new(Arc::clone(world), "Player", 1).build();
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Player", 1).build();
     let expected = RandomSequences::from_persistent(
         world.level_data.read().seed(),
         PersistentRandomSequences::default(),
@@ -253,7 +251,7 @@ fn advancement_rewards_continue_the_named_loot_stream() {
     for _ in 0..2 {
         expected
             .with_random(sequence, |random| {
-                let mut context = LootContext::new(random).with_world(world);
+                let mut context = LootContext::new(random).with_world(&world);
                 for mut item in table.get_random_items(&mut context)? {
                     assert!(inventory.add(&mut item));
                 }
@@ -263,7 +261,7 @@ fn advancement_rewards_continue_the_named_loot_stream() {
         grant_reward(&player, &reward);
         assert_eq!(player.inventory.lock().items(), inventory.items());
     }
-    let actual = bound(world);
+    let actual = bound(&world);
     assert_eq!(draw(&actual, sequence), draw(&expected, sequence));
 }
 
@@ -281,17 +279,17 @@ fn domain_worlds_share_sequences_and_domains_stay_isolated() {
         ResolvedDomainConfig {
             name: "loot_a".to_owned(),
             default_world: Identifier::new_static("loot_a", "overworld"),
-            worlds: domain_a.keys().cloned().collect(),
+            worlds: domain_a.keys().collect(),
         },
         ResolvedDomainConfig {
             name: "loot_b".to_owned(),
             default_world: Identifier::new_static("loot_b", "overworld"),
-            worlds: domain_b.keys().cloned().collect(),
+            worlds: domain_b.keys().collect(),
         },
     ];
     let mut worlds = WorldMap::new("loot_a".to_owned(), &configs, &[]);
     for world in domain_a.values().chain(domain_b.values()) {
-        worlds.insert(world.key.clone(), Arc::clone(world));
+        worlds.insert(world.key.clone(), world);
     }
     let runtime = Builder::new_current_thread()
         .enable_all()
@@ -319,9 +317,9 @@ fn domain_worlds_share_sequences_and_domains_stay_isolated() {
         let nether = worlds
             .get(&Identifier::new_static("loot_a", "nether"))
             .expect("nether");
-        let a_sequences = bound(a);
-        let n_sequences = bound(nether);
-        let b_sequences = bound(worlds.default_world("loot_b").expect("default b"));
+        let a_sequences = bound(&a);
+        let n_sequences = bound(&nether);
+        let b_sequences = bound(&worlds.default_world("loot_b").expect("default b"));
         assert!(Arc::ptr_eq(&a_sequences, &n_sequences));
         assert!(!Arc::ptr_eq(&a_sequences, &b_sequences));
         let key = Identifier::vanilla_static("test");
