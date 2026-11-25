@@ -6,6 +6,7 @@ mod damage;
 mod defaultgamemode;
 mod difficulty;
 mod domain;
+mod emote;
 mod enchant;
 mod execute;
 mod experience;
@@ -16,6 +17,7 @@ pub(crate) mod gamemode;
 mod gamerule;
 mod give;
 mod invsee;
+mod kick;
 mod kill;
 mod list;
 mod locate;
@@ -84,6 +86,7 @@ pub(crate) fn create_registered_dispatcher(
     builder.register(defaultgamemode::registration())?;
     builder.register(difficulty::registration())?;
     builder.register(domain::registration())?;
+    builder.register(emote::registration())?;
     builder.register(enchant::registration())?;
     builder.register(execute::registration())?;
     builder.register(experience::registration())?;
@@ -92,6 +95,7 @@ pub(crate) fn create_registered_dispatcher(
     builder.register(gamemode::registration()?)?;
     builder.register(gamerule::registration())?;
     builder.register(give::registration())?;
+    builder.register(kick::registration())?;
     builder.register(kill::registration())?;
     builder.register(list::registration())?;
     builder.register(locate::registration())?;
@@ -173,6 +177,7 @@ mod tests {
                 "defaultgamemode",
                 "difficulty",
                 "domain",
+                "me",
                 "enchant",
                 "execute",
                 "experience",
@@ -182,6 +187,7 @@ mod tests {
                 "gamemode",
                 "gamerule",
                 "give",
+                "kick",
                 "kill",
                 "list",
                 "locate",

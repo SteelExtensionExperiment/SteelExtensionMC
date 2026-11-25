@@ -117,10 +117,7 @@ impl EntityRegistry {
         if let Some(living) = entity.as_living_entity() {
             living.set_y_head_rot(yaw);
             living.set_y_body_rot(yaw);
-        }
-
-        if let Some(living) = entity.as_living_entity() {
-            living.living_base().load_persistent_state(living, *nbt);
+            living.load_persistent_living_data(*nbt);
         }
         entity.load_additional(*nbt);
         entity.set_old_position_to_current();
