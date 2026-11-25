@@ -25,8 +25,8 @@ use crate::world::World;
 use super::{
     ChunkStorage, LoadedChunk, PersistentChunk,
     format::{
-        CHUNK_TABLE_SIZE, ChunkEntry, FILE_HEADER_SIZE, FIRST_DATA_SECTOR, FORMAT_VERSION,
-        MAX_CHUNK_SIZE, REGION_MAGIC, RegionHeader, RegionPos, SECTOR_SIZE,
+        CHUNK_COMPRESSION_LEVEL, CHUNK_TABLE_SIZE, ChunkEntry, FILE_HEADER_SIZE, FIRST_DATA_SECTOR,
+        FORMAT_VERSION, MAX_CHUNK_SIZE, REGION_MAGIC, RegionHeader, RegionPos, SECTOR_SIZE,
     },
 };
 
@@ -149,7 +149,7 @@ impl RegionManager {
         // Calculate file size in sectors
         let file_size = file.seek(io::SeekFrom::End(0)).await?;
         let file_sectors = file_size.div_ceil(SECTOR_SIZE as u64) as u32;
-        Self::validate_region_entries(&header, file_sectors)?;
+        header.validate_entries(file_sectors)?;
 
         Ok(RegionHandle {
             file,
@@ -214,62 +214,6 @@ impl RegionManager {
         let mut compressed = vec![0u8; size as usize];
         file.read_exact(&mut compressed).await?;
         Ok(compressed)
-    }
-
-    fn validate_chunk_entry(entry: ChunkEntry, file_sectors: u32) -> io::Result<()> {
-        if entry.sector_offset < FIRST_DATA_SECTOR {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "chunk table entry points into the region header at sector {}",
-                    entry.sector_offset
-                ),
-            ));
-        }
-        if entry.size_bytes == 0 || entry.size_bytes as usize > MAX_CHUNK_SIZE {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("invalid chunk table entry size {}", entry.size_bytes),
-            ));
-        }
-        let Some(end_sector) = entry.sector_offset.checked_add(entry.sector_count()) else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "chunk table entry sector range overflowed",
-            ));
-        };
-        if end_sector > file_sectors {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "chunk table entry ends at sector {end_sector}, past region end {file_sectors}"
-                ),
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_region_entries(header: &RegionHeader, file_sectors: u32) -> io::Result<()> {
-        let mut occupied = vec![false; file_sectors as usize];
-        for sector in occupied.iter_mut().take(FIRST_DATA_SECTOR as usize) {
-            *sector = true;
-        }
-        for (index, &entry) in header.entries.iter().enumerate() {
-            if !entry.exists() {
-                continue;
-            }
-            Self::validate_chunk_entry(entry, file_sectors)?;
-            let start = entry.sector_offset as usize;
-            let end = start + entry.sector_count() as usize;
-            if occupied[start..end].iter().any(|is_occupied| *is_occupied) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("chunk table entry {index} overlaps another region allocation"),
-                ));
-            }
-            occupied[start..end].fill(true);
-        }
-        Ok(())
     }
 
     async fn clear_corrupt_chunk_if_unchanged(
@@ -410,7 +354,7 @@ impl RegionManager {
     fn encode_chunk(prepared: PreparedChunkSave) -> io::Result<Vec<u8>> {
         let data = wincode::serialize(&prepared.persistent)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-        let compressed = zstd::encode_all(&data[..], 3)?;
+        let compressed = zstd::encode_all(&data[..], CHUNK_COMPRESSION_LEVEL)?;
 
         if compressed.len() > MAX_CHUNK_SIZE {
             return Err(io::Error::new(
@@ -477,7 +421,7 @@ impl RegionManager {
 
             // Invalid offsets and sizes indicate damage to the region's location
             // table, not a self-contained chunk payload. Do not discard the slot.
-            Self::validate_chunk_entry(entry, handle.file_sectors)?;
+            entry.validate(handle.file_sectors)?;
 
             // Read chunk data from disk
             let compressed =

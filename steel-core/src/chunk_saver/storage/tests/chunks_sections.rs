@@ -162,6 +162,13 @@ fn terrain_heightmap_save_excludes_stale_worldgen_maps() {
     );
 }
 
+fn test_pool() -> rayon::ThreadPool {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .expect("test pool should build")
+}
+
 #[tokio::test]
 async fn ram_only_storage_restores_the_status_bundled_with_the_prepared_save() {
     init_vanilla_registry();
@@ -178,7 +185,10 @@ async fn ram_only_storage_restores_the_status_bundled_with_the_prepared_save() {
     let Ok(true) = storage.save_chunk_data(prepared).await else {
         panic!("prepared chunk should save to RAM storage");
     };
-    let Ok(Some(loaded)) = storage.load_chunk(pos, 0, 16, Weak::new()).await else {
+    let Ok(Some(loaded)) = storage
+        .load_chunk(pos, 0, 16, Weak::new(), &test_pool())
+        .await
+    else {
         panic!("saved chunk should load from RAM storage");
     };
 

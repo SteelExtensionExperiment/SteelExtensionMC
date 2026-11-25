@@ -18,6 +18,7 @@ pub mod fill;
 pub mod fluid_behavior;
 pub mod hooks;
 pub mod hud;
+pub mod inventory_snapshot;
 pub mod items;
 pub mod log;
 pub mod menus;
@@ -31,8 +32,9 @@ pub mod text;
 pub mod world_effects;
 pub mod worlds;
 pub use runtime::{
-    BotInput, Difficulty, GameMode, Operation, OperationState, OperationStatus, PlayerControls,
-    PlayerId, PlayerInfo, Position, WorldSettings,
+    Billboard, BotInput, CloneSettings, CloneTarget, Difficulty, GameMode, HologramId, Operation,
+    OperationState, OperationStatus, PlayerControls, PlayerId, PlayerInfo, Position, TemplateState,
+    TemplateStatus, WorldSettings,
     api::{Command, Commands, Server},
 };
 #[cfg(feature = "host")]
@@ -82,6 +84,7 @@ pub fn bind(bootstrap: Bootstrap) -> Result<(), BindError> {
         .chain(command::api::imports())
         .chain(services::api::imports())
         .chain(items::api::imports())
+        .chain(inventory_snapshot::api::imports())
         .chain(effects::api::imports())
         .chain(hud::api::imports())
         .chain(data::api::imports())

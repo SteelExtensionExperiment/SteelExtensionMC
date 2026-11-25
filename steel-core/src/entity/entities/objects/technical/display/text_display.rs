@@ -14,6 +14,7 @@ use std::sync::{Arc, Weak};
 use steel_macros::entity_behavior;
 use steel_registry::blocks::behavior::PushReaction;
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::vanilla_entities;
 use steel_registry::vanilla_entity_data::{DisplayEntityData, TextDisplayEntityData};
 use steel_utils::locks::SyncMutex;
 use steel_utils::nbt::NbtValueInput as _;
@@ -40,6 +41,9 @@ pub struct TextDisplayEntity {
     base: EntityBase,
     entity_type: EntityTypeRef,
     entity_data: SyncMutex<TextDisplayEntityData>,
+    /// `false` for Steel-owned holograms, which are rebuilt from their registry
+    /// record instead of being saved with the chunk.
+    persistent: bool,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `TextDisplayEntity`.
@@ -66,12 +70,22 @@ impl TextDisplayEntity {
         )
     }
 
+    /// Creates a text display that is never saved with its chunk.
+    #[must_use]
+    pub fn new_hologram(id: i32, position: DVec3, world: Weak<World>) -> Self {
+        Self {
+            persistent: false,
+            ..Self::new(&vanilla_entities::TEXT_DISPLAY, id, position, world)
+        }
+    }
+
     #[must_use]
     fn new_with_base(base: EntityBase, entity_type: EntityTypeRef) -> Self {
         Self {
             base: modify_display_entity_base(base),
             entity_type,
             entity_data: SyncMutex::new(TextDisplayEntityData::new()),
+            persistent: true,
         }
     }
 }
@@ -87,6 +101,10 @@ impl Entity for TextDisplayEntity {
 
     fn synced_data(&self) -> Option<&dyn EntitySyncedData> {
         Some(&self.entity_data)
+    }
+
+    fn is_persistent(&self) -> bool {
+        self.persistent && self.entity_type().can_serialize
     }
 
     fn tick(self: Arc<Self>) {

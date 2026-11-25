@@ -9,6 +9,7 @@ use serde::{Deserialize, Deserializer, de::Error as DeError};
 use std::{
     collections::BTreeMap,
     path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 pub use steel_protocol::packet_traits::CompressionInfo;
 use steel_protocol::packets::config::{CServerLinks, Link, ServerLinksType};
@@ -21,6 +22,7 @@ use toml::map::Map;
 
 use crate::chunk_saver::registry::WorldStorageRegistry;
 use crate::player::hud::HudPolicy;
+use crate::world::template::WorldTemplate;
 use crate::worldgen::registry::{ValidatedWorldGeneratorConfig, WorldGeneratorRegistry};
 
 /// Error returned when online mode is configured without its authentication handshake.
@@ -203,6 +205,12 @@ pub enum WorldStorageConfig {
     /// RAM-only storage with empty chunks created on demand.
     /// No data is persisted — useful for testing and minigames.
     RamOnly,
+    /// RAM-only storage backed by a read-only template. Chunks the world has not saved are read
+    /// from the template; edits stay in this world.
+    RamClone {
+        /// Template shared by every clone.
+        template: Arc<WorldTemplate>,
+    },
 }
 
 /// Parsed `worlds.toml` root.

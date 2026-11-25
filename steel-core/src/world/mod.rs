@@ -94,7 +94,7 @@ use crate::{
     behavior::{BLOCK_BEHAVIORS, BlockCollisionContext, BlockLootContext, FLUID_BEHAVIORS},
     block_entity::{BlockEntity, SharedBlockEntity, entities::EndGatewayBlockEntity},
     chunk::{heightmap::HeightmapType, player_chunk_view::PlayerChunkView},
-    chunk_saver::{ChunkStorage, RamOnlyStorage, RegionManager},
+    chunk_saver::ChunkStorage,
     entity::{
         AddEntityError, Entity, EntityChangeSenders, EntityChunkCallback, EntityLifecycleChanges,
         EntityMovementSyncPacket, EntityOwnership, EntityTracker, EntityVisibility,
@@ -128,6 +128,7 @@ mod events;
 pub mod explosion;
 /// Vanilla game-event contexts, listeners, and dispatch storage.
 pub mod game_event;
+mod hologram;
 mod level_effects;
 mod level_reader;
 mod player_index;
@@ -140,6 +141,7 @@ mod signal_getter;
 mod sleep;
 mod sleep_status;
 mod spawn;
+pub mod template;
 pub mod tick_scheduler;
 mod weather;
 mod world_entities;
@@ -167,6 +169,7 @@ pub use explosion::{
     SimpleExplosionDamageCalculator,
 };
 pub(crate) use explosion::{ExplosionBlockReader, ImmutableExplosionBlockCalculator};
+pub use hologram::{HologramError, HologramId};
 pub use level_reader::{LevelAccessor, LevelReader, ScheduledTickAccess};
 pub use player_index::{PlayerAreaMap, PlayerMap};
 pub use raycast::{ClipBlockShape, ClipFluid, ClipHitResult, RaytraceAction};
@@ -300,6 +303,8 @@ pub struct World {
     tick_runs_normally: AtomicBool,
     /// Whether vanilla's scheduled/chunk/block-event tick phase is active.
     handling_tick: AtomicBool,
+    /// Set when removal of this runtime world starts; the world then refuses every entry.
+    retiring: AtomicBool,
     /// Ordered, duplicate-suppressing server block events awaiting execution.
     block_events: SyncMutex<BlockEventQueue>,
     /// Vanilla collecting neighbor updater shared by all live block mutations.
@@ -310,6 +315,8 @@ pub struct World {
     /// World-global ordered block-entity ticker phase.
     block_entity_tickers: block_entity_ticker::WorldBlockEntityTickers,
     pub(crate) block_seats: BlockSeats,
+    /// Text holograms of this world; their entities follow chunk loading.
+    holograms: hologram::HologramRegistry,
     /// Physical entries retained by this world's chunk-owned game-event registries.
     game_event_listener_count: Arc<GameEventListenerCount>,
     /// Entity tracker for managing which players can see which entities.
@@ -338,6 +345,25 @@ pub struct World {
 }
 
 impl World {
+    /// Whether removal of this runtime world has started. Retiring worlds refuse new entries.
+    #[must_use]
+    pub fn is_retiring(&self) -> bool {
+        self.retiring.load(Ordering::Acquire)
+    }
+
+    /// Marks the world as being removed; irreversible.
+    pub(crate) fn begin_retiring(&self) {
+        self.retiring.store(true, Ordering::Release);
+    }
+
+    /// Stops the chunk tasks of a runtime world and waits for them. The RAM contents are
+    /// discarded; serializing chunks would only retain them longer.
+    pub(crate) async fn retire_runtime(self: Arc<Self>) {
+        self.chunk_map.stop_generation_refill_loop();
+        self.chunk_map.task_tracker.close();
+        self.chunk_map.task_tracker.wait().await;
+    }
+
     /// Gameplay event subscriptions, absent for worlds created without server extensions.
     #[must_use]
     pub fn events(&self) -> Option<&Events> {
@@ -395,14 +421,7 @@ impl World {
         let sea_level = config.sea_level;
         let default_gamemode = config.default_gamemode;
         // Create storage backend based on config
-        let storage: Arc<ChunkStorage> = match &config.storage {
-            WorldStorageConfig::Disk { path } => {
-                Arc::new(ChunkStorage::Disk(RegionManager::new(path.clone())))
-            }
-            WorldStorageConfig::RamOnly => {
-                Arc::new(ChunkStorage::RamOnly(RamOnlyStorage::empty_world()))
-            }
-        };
+        let storage = ChunkStorage::from_config(&config.storage);
 
         // Create or skip level data based on config
 
@@ -481,12 +500,14 @@ impl World {
                 default_gamemode: AtomicI8::new(default_gamemode.into()),
                 tick_runs_normally: AtomicBool::new(true),
                 handling_tick: AtomicBool::new(false),
+                retiring: AtomicBool::new(false),
                 block_events: SyncMutex::new(BlockEventQueue::default()),
                 neighbor_updater: CollectingNeighborUpdater::new(max_chained_neighbor_updates),
                 entity_manager: WorldEntityManager::new(),
                 domain_entity_directory: SyncRwLock::new(None),
                 block_entity_tickers: block_entity_ticker::WorldBlockEntityTickers::new(),
                 block_seats: BlockSeats::default(),
+                holograms: hologram::HologramRegistry::default(),
                 game_event_listener_count: GameEventListenerCount::shared(),
                 entity_tracker: EntityTracker::new(),
                 navigating_mobs: NavigatingMobTracker::new(),

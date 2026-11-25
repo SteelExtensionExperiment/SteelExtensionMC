@@ -1,12 +1,23 @@
 services:
   steel:
+    build: .
     image: ghcr.io/steel-foundation/steelmc:nightly
+    container_name: steel-mc
+    restart: unless-stopped
     stdin_open: true
     tty: true
-    container_name: steel-mc
+    # Run as the host user so bind-mounted files stay owned by you. Set PUID/PGID in .env or the
+    # shell (`id -u`, `id -g`) if yours isn't 1000. Create the four mount dirs first, or Docker
+    # creates them as root: `mkdir -p config saves extensions .logs`
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
-      - 25565:25565
+      - "25565:25565"
     volumes:
-      - ./config:/config
-      - ./saves:/saves
-      - ./logs:/.logs
+      # server config: config.toml, worlds.toml, groups.toml, favicon.png
+      - ./config:/data/config
+      # world, player and domain saves (worlds.toml save_path = "saves")
+      - ./saves:/data/saves
+      # extension .zip/.so files; each extension's private storage lives in extensions/<name>/
+      - ./extensions:/data/extensions
+      # log files and console history (config.toml [log] log_path = "./.logs")
+      - ./.logs:/data/.logs

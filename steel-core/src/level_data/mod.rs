@@ -342,6 +342,27 @@ impl LevelData {
         }
     }
 
+    /// Reads `level.toml` from a world directory without writing anything.
+    ///
+    /// Unlike [`LevelDataManager::new`] it adopts nothing and never marks the data dirty, so it
+    /// is safe on a read-only template folder.
+    pub async fn read_snapshot(world_dir: impl AsRef<Path>) -> io::Result<Self> {
+        let path = world_dir.as_ref().join("level.toml");
+        let content = fs::read_to_string(&path).await?;
+        let invalid = |e: toml::de::Error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid {}: {e}", path.display()),
+            )
+        };
+        let mut data: Self = toml::from_str(&content).map_err(invalid)?;
+        data.load_game_rules();
+        data.world_clocks
+            .initialize_registered_clocks()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        Ok(data)
+    }
+
     /// Loads game rules from the serialized map into the runtime values.
     pub fn load_game_rules(&mut self) {
         self.game_rules_values = GameRuleValues::new(&REGISTRY.game_rules);
@@ -742,6 +763,38 @@ mod tests {
         let _ = std_fs::remove_dir_all(&dir);
 
         assert_eq!(seed, 7);
+    }
+
+    #[tokio::test]
+    async fn read_snapshot_returns_saved_settings_and_writes_nothing() {
+        init_vanilla_registry();
+        let dir = temp_level_data_dir("read-snapshot");
+        let mut data = LevelData::new_with_seed_and_difficulty(1234, Difficulty::Hard);
+        data.generation = Some(settings("minecraft:overworld", 384));
+        data.set_spawn_pos(BlockPos::new(10, 70, -5));
+        data.game_time = Some(0);
+        data.save_game_rules();
+        std_fs::write(
+            dir.join("level.toml"),
+            toml::to_string_pretty(&data).expect("level data should serialize"),
+        )
+        .expect("level.toml should be written");
+        let before = std_fs::read(dir.join("level.toml")).expect("level.toml should read");
+        let entries_before = std_fs::read_dir(&dir).expect("dir should list").count();
+
+        let snapshot = LevelData::read_snapshot(&dir)
+            .await
+            .expect("snapshot should read");
+
+        let after = std_fs::read(dir.join("level.toml")).expect("level.toml should read");
+        let entries_after = std_fs::read_dir(&dir).expect("dir should list").count();
+        let _ = std_fs::remove_dir_all(&dir);
+        assert_eq!(before, after);
+        assert_eq!(entries_before, entries_after);
+        assert_eq!(snapshot.seed, 1234);
+        assert_eq!(snapshot.difficulty, Difficulty::Hard);
+        assert_eq!(snapshot.spawn_pos(), BlockPos::new(10, 70, -5));
+        assert_eq!(snapshot.generation, data.generation);
     }
 
     #[test]

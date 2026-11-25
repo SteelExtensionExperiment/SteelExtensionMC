@@ -363,6 +363,7 @@ impl World {
             ticking_started: result.ticking_started,
             ticking_stopped: Vec::new(),
         });
+        self.spawn_chunk_holograms(pos);
     }
 
     pub(crate) fn update_entity_chunk_visibility(
@@ -398,6 +399,7 @@ impl World {
             });
         }
         self.entity_manager.finalize_chunk_unload(pos);
+        self.forget_chunk_hologram_entities(pos);
     }
 
     /// Spawns an item entity at the given position.

@@ -163,16 +163,14 @@ fn write_data(stack: &mut ItemStack, key: &str, value: &str) -> Result<(), Strin
     Ok(())
 }
 
-const INVENTORY_SLOTS: i32 = 41;
+/// Slots 0-40: hotbar, main, armor and off hand.
+pub(crate) const INVENTORY_SLOTS: usize = 41;
 
 fn slot_index(slot: i32) -> Result<usize, String> {
-    if (0..INVENTORY_SLOTS).contains(&slot) {
-        usize::try_from(slot).map_err(|error| error.to_string())
-    } else {
-        Err(format!(
-            "inventory slot {slot} is outside 0..{INVENTORY_SLOTS}"
-        ))
-    }
+    usize::try_from(slot)
+        .ok()
+        .filter(|index| *index < INVENTORY_SLOTS)
+        .ok_or_else(|| format!("inventory slot {slot} is outside 0..{INVENTORY_SLOTS}"))
 }
 
 fn changed(player: &Player) {

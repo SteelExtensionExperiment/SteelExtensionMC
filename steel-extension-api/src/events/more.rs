@@ -757,6 +757,11 @@ pub mod api {
         pub fn player(&self) -> PlayerId {
             host::player_id(&self.host().event.player)
         }
+        /// The world of the edited sign, which is the editing player's world.
+        #[must_use]
+        pub fn world(&self) -> World<'a> {
+            World::from_host(self.host().world())
+        }
         /// Server.
         #[must_use]
         pub fn server(&self) -> Server<'a> {

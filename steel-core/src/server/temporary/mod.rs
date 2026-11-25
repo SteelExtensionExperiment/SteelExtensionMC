@@ -3,16 +3,23 @@
 use super::{
     PlayerAdmissionState, Server,
     jobs::{JobPoll, ServerJob, ServerJobContext},
+    world_operations::WorldOperationId,
+    worlds::RuntimePlacement,
 };
 use crate::{
     chunk::chunk_request::ChunkRequestHandle, level_data::GameTimeSource,
     loot::random_sequences::RandomSequences, world::World,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use tokio::task::JoinHandle;
 use tokio_util::task::TaskTracker;
+mod clone;
 mod preparation;
+mod removal;
+mod request;
+pub use clone::CloneOverrides;
 use preparation::PreparedWorld;
+pub use request::{DomainTarget, RuntimeWorldRequest, WorldSource};
 use std::sync::{Arc, Weak, mpsc};
 use steel_utils::{
     BlockPos, Identifier,
@@ -20,9 +27,6 @@ use steel_utils::{
     types::{Difficulty, GameType},
 };
 
-/// Identity of an asynchronous world operation, consumed when its result is read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WorldOperationId(pub u64);
 /// A world prepared using a registered generator, with no disk-backed state.
 pub struct TemporaryWorldRequest {
     /// Unique `domain:world` identity.
@@ -49,30 +53,19 @@ pub(super) struct TemporaryWorlds {
 }
 #[derive(Default)]
 struct State {
-    next: u64,
-    operations: FxHashMap<WorldOperationId, Option<Result<Identifier, String>>>,
     domains: FxHashMap<String, DomainState>,
+    /// Keys of worlds being prepared, so a duplicate request fails before preparation.
+    pending_worlds: FxHashSet<Identifier>,
+    /// Keeps each runtime world's spawn chunks loaded until the world is removed.
+    spawn_tickets: FxHashMap<Identifier, ChunkRequestHandle>,
 }
 struct DomainState {
     closing: bool,
     creating: usize,
-    spawn_tickets: Vec<ChunkRequestHandle>,
+    /// Worlds of this domain whose removal is in progress.
+    removing: usize,
 }
 impl TemporaryWorlds {
-    fn allocate(state: &mut State) -> Result<WorldOperationId, String> {
-        state.next = state
-            .next
-            .checked_add(1)
-            .ok_or("world operation identities exhausted")?;
-        let id = WorldOperationId(state.next);
-        state.operations.insert(id, None);
-        Ok(id)
-    }
-    fn finish(&self, id: WorldOperationId, result: Result<Identifier, String>) {
-        if let Some(slot) = self.state.lock().operations.get_mut(&id) {
-            *slot = Some(result);
-        }
-    }
     pub(super) fn is_closing(&self, domain: &str) -> bool {
         self.state
             .lock()
@@ -87,69 +80,112 @@ impl Server {
         self: &Arc<Self>,
         request: TemporaryWorldRequest,
     ) -> Result<WorldOperationId, String> {
+        self.create_runtime_world(request.into())
+    }
+    /// The clock a new world runs on and the loot random sequences it shares.
+    fn clock_and_sequences(
+        &self,
+        request: &RuntimeWorldRequest,
+        domain: &str,
+    ) -> Result<(GameTimeSource, Arc<RandomSequences>), String> {
+        Ok(match request.target {
+            DomainTarget::NewTemporary => (
+                GameTimeSource::Primary,
+                Arc::new(RandomSequences::new(request.seed)),
+            ),
+            DomainTarget::TemporarySibling | DomainTarget::Existing => {
+                if !self.worlds.has_domain(domain) {
+                    return Err(format!("domain {domain} is not loaded"));
+                }
+                // A temporary domain keeps its loot random sequences on its default world, so a
+                // domain whose default world was removed cannot take new worlds.
+                let default = self.worlds.default_world(domain).ok_or_else(|| {
+                    format!(
+                        "domain {domain} has no default world, so it has no loot random sequences to share"
+                    )
+                })?;
+                let sequences = default
+                    .random_sequences
+                    .read()
+                    .as_ref()
+                    .map(Arc::clone)
+                    .ok_or("domain has no loot random sequences")?;
+                let clock = if request.target == DomainTarget::Existing {
+                    GameTimeSource::Primary
+                } else {
+                    GameTimeSource::Derived(Arc::clone(&default.game_time))
+                };
+                (clock, sequences)
+            }
+        })
+    }
+    /// Starts preparing a RAM-only runtime world. The operation publishes it at a tick boundary.
+    ///
+    /// # Errors
+    /// Fails immediately, without an operation, when the key is loaded or pending, the domain
+    /// rules of the target are not met, the generator config is invalid, or the spawn is outside
+    /// the dimension's build height.
+    pub fn create_runtime_world(
+        self: &Arc<Self>,
+        request: RuntimeWorldRequest,
+    ) -> Result<WorldOperationId, String> {
         if !World::is_in_spawnable_bounds(request.spawn) {
             return Err("spawn is outside world bounds".into());
         }
         let domain = request.key.namespace.to_string();
-        if request.primary && self.player_data_storage.is_temporary_domain(&domain) {
+        let primary = request.target == DomainTarget::NewTemporary;
+        if primary && self.player_data_storage.is_temporary_domain(&domain) {
             return Err("temporary domain identity has already been used".into());
         }
+        if self.worlds.get(&request.key).is_some() {
+            return Err(format!("world {} already exists", request.key));
+        }
         let source = self.overworld();
-        let validated = self
-            .world_generators
-            .validate_config(&request.generator, &request.config)?;
+        let (generator, config) = request.source.generator_config();
+        let validated = self.world_generators.validate_config(generator, config)?;
         let dimension = validated.dimension_type();
         if !(dimension.min_y..dimension.min_y + dimension.height).contains(&request.spawn.y()) {
             return Err("spawn is outside the dimension build height".into());
         }
-        let (game_time_source, random_sequences) = if request.primary {
-            (
-                GameTimeSource::Primary,
-                Arc::new(RandomSequences::new(request.seed)),
-            )
-        } else {
-            let primary = self
-                .worlds
-                .default_world(&domain)
-                .ok_or("temporary domain is not loaded")?;
-            let sequences = primary
-                .random_sequences
-                .read()
-                .as_ref()
-                .map(Arc::clone)
-                .ok_or("temporary domain has no loot random sequences")?;
-            (
-                GameTimeSource::Derived(Arc::clone(&primary.game_time)),
-                sequences,
-            )
-        };
+        let (game_time_source, random_sequences) = self.clock_and_sequences(&request, &domain)?;
         let id = {
             let mut state = self.temporary_worlds.state.lock();
-            if request.primary {
+            if state.pending_worlds.contains(&request.key) {
+                return Err(format!("world {} is already being created", request.key));
+            }
+            if primary {
                 if self.worlds.has_domain(&domain) || state.domains.contains_key(&domain) {
                     return Err("domain identity is already in use".into());
                 }
+            } else {
+                // Lasting domains have no entry here; they are never closed.
+                match state.domains.get(&domain) {
+                    Some(entry) if entry.closing => {
+                        return Err("temporary domain is closing".into());
+                    }
+                    None if request.target == DomainTarget::TemporarySibling => {
+                        return Err("worlds can only be added to temporary domains".into());
+                    }
+                    _ => {}
+                }
+            }
+            let id = self.world_operations.allocate()?;
+            state.pending_worlds.insert(request.key.clone());
+            if primary {
                 state.domains.insert(
                     domain.clone(),
                     DomainState {
                         closing: false,
                         creating: 1,
-                        spawn_tickets: Vec::new(),
+                        removing: 0,
                     },
                 );
-            } else {
-                let entry = state
-                    .domains
-                    .get_mut(&domain)
-                    .ok_or("worlds can only be added to temporary domains")?;
-                if entry.closing {
-                    return Err("temporary domain is closing".into());
-                }
+            } else if let Some(entry) = state.domains.get_mut(&domain) {
                 entry.creating += 1;
             }
-            TemporaryWorlds::allocate(&mut state)?
+            id
         };
-        let primary = request.primary;
+        let key = request.key.clone();
         let (sender, receiver) = mpsc::channel();
         let server = Arc::clone(self);
         let task = self.temporary_worlds.cleanup.spawn(async move {
@@ -167,29 +203,13 @@ impl Server {
         self.jobs.spawn(CreateWorldJob {
             server: Arc::downgrade(self),
             id,
+            key,
             domain,
             primary,
             receiver,
             task,
         });
         Ok(id)
-    }
-    /// Reads and consumes a completed operation. `None` means its job is still running.
-    pub fn take_world_operation(
-        &self,
-        id: WorldOperationId,
-    ) -> Result<Option<Result<Identifier, String>>, String> {
-        let mut state = self.temporary_worlds.state.lock();
-        let slot = state
-            .operations
-            .get_mut(&id)
-            .ok_or("unknown or consumed world operation")?;
-        if slot.is_none() {
-            return Ok(None);
-        }
-        let result = slot.take();
-        state.operations.remove(&id);
-        Ok(result)
     }
     /// Retires a temporary domain once all players and domain transitions have left it.
     /// No new entries are accepted after this call.
@@ -207,7 +227,7 @@ impl Server {
                 return Err("domain is already closing".into());
             }
             entry.closing = true;
-            TemporaryWorlds::allocate(&mut state)?
+            self.world_operations.allocate()?
         };
         self.jobs.spawn(DestroyDomainJob {
             server: Arc::downgrade(self),
@@ -220,6 +240,7 @@ impl Server {
 struct CreateWorldJob {
     server: Weak<Server>,
     id: WorldOperationId,
+    key: Identifier,
     domain: String,
     primary: bool,
     receiver: mpsc::Receiver<Result<PreparedWorld, String>>,
@@ -251,25 +272,29 @@ impl ServerJob for CreateWorldJob {
                 server.command_storage.insert_temporary(&self.domain);
             }
             let key = world.key.clone();
+            let placement = if self.primary {
+                RuntimePlacement::NewDomainDefault
+            } else {
+                RuntimePlacement::Member
+            };
             server
                 .worlds
-                .publish_temporary_world(Arc::clone(world), self.primary)?;
+                .publish_runtime_world(Arc::clone(world), placement)?;
             server.fire_world_load(world);
-            if let Some(ticket) = prepared.spawn_ticket.take()
-                && let Some(domain) = server
+            if let Some(ticket) = prepared.spawn_ticket.take() {
+                server
                     .temporary_worlds
                     .state
                     .lock()
-                    .domains
-                    .get_mut(&self.domain)
-            {
-                domain.spawn_tickets.push(ticket);
+                    .spawn_tickets
+                    .insert(key.clone(), ticket);
             }
             prepared.published = true;
             Ok(key)
         });
         {
             let mut state = server.temporary_worlds.state.lock();
+            state.pending_worlds.remove(&self.key);
             if let Some(domain) = state.domains.get_mut(&self.domain) {
                 domain.creating -= 1;
             }
@@ -287,13 +312,14 @@ impl ServerJob for CreateWorldJob {
                 .player_data_storage
                 .retire_temporary_domain(&self.domain);
         }
-        server.temporary_worlds.finish(self.id, result);
+        server.world_operations.finish(self.id, result);
         JobPoll::Finished
     }
     fn cancel(&mut self) {
         self.task.abort();
         if let Some(server) = self.server.upgrade() {
             let mut state = server.temporary_worlds.state.lock();
+            state.pending_worlds.remove(&self.key);
             if self.primary {
                 state.domains.remove(&self.domain);
             } else if let Some(domain) = state.domains.get_mut(&self.domain) {
@@ -301,7 +327,7 @@ impl ServerJob for CreateWorldJob {
             }
             drop(state);
             server
-                .temporary_worlds
+                .world_operations
                 .finish(self.id, Err("temporary world creation cancelled".into()));
         }
     }
@@ -322,7 +348,7 @@ impl ServerJob for DestroyDomainJob {
             .lock()
             .domains
             .get(&self.domain)
-            .is_some_and(|d| d.creating != 0);
+            .is_some_and(|d| d.creating != 0 || d.removing != 0);
         if creating
             || server
                 .get_players()
@@ -355,23 +381,21 @@ impl ServerJob for DestroyDomainJob {
         server
             .player_data_storage
             .retire_temporary_domain(&self.domain);
-        server
-            .temporary_worlds
-            .state
-            .lock()
-            .domains
-            .remove(&self.domain);
+        {
+            let mut state = server.temporary_worlds.state.lock();
+            state.domains.remove(&self.domain);
+            state
+                .spawn_tickets
+                .retain(|key, _| key.namespace.as_ref() != self.domain);
+        }
         let id = self.id;
         let domain = self.domain.clone();
         server.temporary_worlds.cleanup.clone().spawn(async move {
             for world in worlds {
-                world.chunk_map.stop_generation_refill_loop();
-                world.chunk_map.task_tracker.close();
-                world.chunk_map.task_tracker.wait().await;
-                // The entire RAM world is discarded; serializing chunks would only retain it longer.
+                world.retire_runtime().await;
             }
             server
-                .temporary_worlds
+                .world_operations
                 .finish(id, Ok(Identifier::new(domain, "retired")));
         });
         JobPoll::Finished
@@ -388,11 +412,15 @@ impl ServerJob for DestroyDomainJob {
                 domain.closing = false;
             }
             server
-                .temporary_worlds
+                .world_operations
                 .finish(self.id, Err("temporary domain retirement cancelled".into()));
         }
     }
 }
 
+#[cfg(test)]
+mod clone_tests;
+#[cfg(test)]
+mod removal_tests;
 #[cfg(test)]
 mod tests;
