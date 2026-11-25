@@ -317,7 +317,18 @@ pub mod api {
             &mut self,
             callback: extern "C" fn(ContentRegistry<'_>) -> ApiResult<()>,
         ) -> ApiResult<()> {
-            content::subscribe(self.host_mut(), callback)
+            content::subscribe(self.host_mut(), move |registry| callback(registry))
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        #[doc(hidden)]
+        pub fn register_content_callback(
+            &mut self,
+            callback: extern "C" fn(ContentRegistry<'_>, u64) -> ApiResult<()>,
+            token: u64,
+        ) -> ApiResult<()> {
+            content::subscribe(self.host_mut(), move |registry| callback(registry, token))
                 .map_err(ApiString::from)
                 .into()
         }

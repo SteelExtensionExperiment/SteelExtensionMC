@@ -154,6 +154,12 @@ pub mod api {
                 .map_err(ApiString::from)
                 .into()
         }
+
+        /// Closes this menu instance if it is still open for the player.
+        /// Returns whether the close was accepted.
+        pub fn close_menu_instance(&self, player: PlayerId, menu: u64) -> bool {
+            host::close_menu_instance(self.host(), player, menu)
+        }
     }
 }
 

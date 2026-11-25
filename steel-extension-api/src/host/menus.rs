@@ -22,6 +22,7 @@ use steel_core::{
     },
     inventory::{
         container::{Container, SimpleContainer},
+        lock::ContainerRef,
         menu::kinds::display_chest,
     },
     player::Player,
@@ -193,6 +194,18 @@ pub(crate) fn close_menu(server: &CoreServer, id: PlayerId) -> Result<(), String
     }
     player.close_container();
     Ok(())
+}
+
+pub(crate) fn close_menu_instance(server: &CoreServer, id: PlayerId, menu: u64) -> bool {
+    let Ok(player) = super::players::find(server, id) else {
+        return false;
+    };
+    let container = OPEN_MENUS
+        .lock()
+        .range(entries_of(&player))
+        .find(|(_, open)| open.id == menu)
+        .map(|(_, open)| ContainerRef::from(&open.container));
+    container.is_some_and(|container| player.close_container_using(container))
 }
 
 struct ClickRouter;

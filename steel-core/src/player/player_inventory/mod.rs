@@ -6,7 +6,10 @@ use smallvec::SmallVec;
 use text_components::TextComponent;
 
 use crate::{
-    inventory::{lock::ContainerId, menu::Menu},
+    inventory::{
+        lock::{ContainerId, ContainerRef},
+        menu::Menu,
+    },
     player::Player,
     world::World,
 };
@@ -125,7 +128,10 @@ struct TerminalMenuRemoval {
 }
 
 enum DeferredMenuAction {
-    Close { send_packet: bool },
+    Close {
+        send_packet: bool,
+        target: Option<ContainerRef>,
+    },
     Open(Box<PendingMenuOpen>),
     Install(Box<PreparedMenu>),
 }

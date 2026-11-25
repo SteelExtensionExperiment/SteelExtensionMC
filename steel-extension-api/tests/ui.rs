@@ -9,6 +9,8 @@ use std::{io::Cursor, sync::Arc, time::Duration};
 use rustc_hash::FxHashMap;
 use steel_core::{
     entity::next_entity_id,
+    extension::{EventHandler, EventPriority, events::InventoryClickEvent},
+    inventory::{container::SimpleContainer, lock::ContainerRef, menu::kinds::display_chest},
     player::{
         ClientInformation, Player, PlayerConnection, PlayerSession,
         connection::{JavaConnection, OutboundPacket},
@@ -30,7 +32,11 @@ use steel_registry::{
     packets::play::{C_CONTAINER_SET_CONTENT, C_CONTAINER_SET_SLOT, C_OPEN_SCREEN},
     vanilla_items,
 };
-use steel_utils::{codec::VarInt, locks::AsyncMutex, serial::ReadFrom};
+use steel_utils::{
+    codec::VarInt,
+    locks::{AsyncMutex, IntoShared, SyncMutex},
+    serial::ReadFrom,
+};
 use text_components::{Modifier, TextComponent, format::Color};
 use tokio::{sync::mpsc, time::timeout};
 use tokio_util::sync::CancellationToken;
@@ -60,11 +66,17 @@ const GAUGE_LEVELS: usize = 15;
 #[ignore = "requires cargo build --manifest-path extension-example/ui/Cargo.toml --workspace"]
 fn ui_demos_animate_and_route_buttons_with_both_pack_modes() -> Result<(), String> {
     let dir = tempfile::tempdir().map_err(|error| error.to_string())?;
-    let loaded = common::load_extensions(
+    let mut loaded = common::load_extensions(
         &[("steel_ui_demo", ""), ("steel_ui_extension", "")],
         dir.path(),
     )?;
     assert_eq!(loaded.order, ["steel-ui", "steel-ui-demo"]);
+    let close_probe = Arc::new(SyncMutex::new(SessionCloseProbe::default()));
+    loaded.extensions.hooks.events.inventory_click.subscribe(
+        EventPriority::Lowest,
+        false,
+        Box::new(ReplaceMenuOnClick(Arc::clone(&close_probe))),
+    );
     let assets = REGISTRY.client_content.resource_pack();
     assert!(
         assets.files().any(|(path, _)| {
@@ -157,12 +169,79 @@ fn ui_demos_animate_and_route_buttons_with_both_pack_modes() -> Result<(), Strin
         let result = async {
             check_screen(&running).await?;
             check_reactor_fallback(&running).await?;
-            check_packed_reactor(&running).await
+            check_packed_reactor(&running).await?;
+            check_deferred_session_close(&running, close_probe).await
         }
         .await;
         common::stop(running, &loaded.initialized, &fixture.world).await?;
         result
     })
+}
+
+#[derive(Default)]
+struct SessionCloseProbe {
+    target: Option<ContainerRef>,
+    close_accepted: bool,
+}
+
+struct ReplaceMenuOnClick(Arc<SyncMutex<SessionCloseProbe>>);
+
+impl EventHandler<InventoryClickEvent> for ReplaceMenuOnClick {
+    fn handle(&self, event: &mut InventoryClickEvent, _: EventPriority) {
+        let Some(target) = self.0.lock().target.take() else {
+            return;
+        };
+        event.cancelled = true;
+        event.player.open_menu("Replacement", |context| {
+            display_chest(
+                &context.player.inventory,
+                context.container_id,
+                SimpleContainer::new(9).into_shared(),
+                1,
+            )
+        });
+        self.0.lock().close_accepted = event.player.close_container_using(target);
+    }
+}
+
+async fn check_deferred_session_close(
+    running: &common::Running,
+    probe: Arc<SyncMutex<SessionCloseProbe>>,
+) -> Result<(), String> {
+    let actor = Arc::clone(&running.player);
+    common::on_tick(&running.server, move || {
+        let container = SimpleContainer::new(9).into_shared();
+        probe.lock().target = Some(ContainerRef::from(&container));
+        actor.open_menu("Original", move |context| {
+            display_chest(
+                &context.player.inventory,
+                context.container_id,
+                container,
+                1,
+            )
+        });
+        let container_id = actor.open_container_id().ok_or("original menu is closed")?;
+        actor.handle_container_click(SContainerClick {
+            container_id: i32::from(container_id),
+            state_id: 0,
+            slot_num: 0,
+            button_num: 0,
+            click_type: ClickType::Pickup,
+            changed_slots: FxHashMap::default(),
+            carried_item: HashedStack::Empty,
+        });
+        assert!(
+            probe.lock().close_accepted,
+            "the original view was still active during the click"
+        );
+        let replacement = actor
+            .open_container_id()
+            .ok_or("deferred close removed the replacement")?;
+        assert_ne!(replacement, container_id);
+        actor.close_container();
+        Ok(())
+    })
+    .await
 }
 
 async fn check_reactor_fallback(running: &common::Running) -> Result<(), String> {

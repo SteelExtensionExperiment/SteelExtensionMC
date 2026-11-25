@@ -5,6 +5,7 @@ mod biome;
 mod definition;
 mod entity;
 mod fluid;
+mod registration;
 pub use biome::{BiomeDefinition, BiomeParticle};
 pub use entity::{EntityDefinition, MobAttribute, MobEquipment, MobStyle};
 mod shapes;

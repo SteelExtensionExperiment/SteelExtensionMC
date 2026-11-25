@@ -77,7 +77,7 @@ impl ContentRegistration<'_> {
 
 pub(crate) fn subscribe(
     hooks: &mut HookRegistration<'_>,
-    callback: extern "C" fn(ContentRegistry<'_>) -> ApiResult<()>,
+    callback: impl FnOnce(ContentRegistry<'_>) -> ApiResult<()> + Send + 'static,
 ) -> Result<(), String> {
     hooks.extension.begin_registration();
     let extension = Arc::clone(hooks.extension);
@@ -95,7 +95,7 @@ pub(crate) fn subscribe(
 fn register_content(
     registry: &mut Registry,
     extension: &Arc<ExtensionState>,
-    callback: extern "C" fn(ContentRegistry<'_>) -> ApiResult<()>,
+    callback: impl FnOnce(ContentRegistry<'_>) -> ApiResult<()>,
 ) -> Result<(), ApiString> {
     let mut block_behaviors = Vec::new();
     let mut registration = ContentRegistration {
