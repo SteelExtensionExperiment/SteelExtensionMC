@@ -64,6 +64,7 @@ pub mod api {
         }
 
         /// Adds a PNG and creates a flat item model with the supplied namespaced key.
+        /// Menu model keys under `ui/` store their PNGs under `textures/ui/`.
         pub fn register_item_texture(
             &mut self,
             model: Str<'_>,

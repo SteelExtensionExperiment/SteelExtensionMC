@@ -15,6 +15,7 @@ use std::{
 use hyper::body::Bytes;
 use reqwest::Url;
 use serde::Deserialize;
+use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
 use steel_protocol::packets::common::{CResourcePackPush, MAX_RESOURCE_PACK_URL_LENGTH};
 use steel_registry::client_content::ResourcePackAssets;
@@ -22,6 +23,8 @@ use steel_utils::version::RESOURCE_PACK_FORMAT;
 use tokio::net::TcpListener;
 use uuid::Builder;
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
+
+const ITEM_ATLAS_PATH: &str = "assets/minecraft/atlases/items.json";
 
 /// Controls whether joining clients are offered the combined pack.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -177,7 +180,44 @@ fn build_zip(extensions: &ResourcePackAssets, extra_packs: &[PathBuf]) -> Result
         spend_asset_bytes(&mut remaining, bytes.len() as u64)?;
         insert_asset(&mut assets, path.to_owned(), bytes.to_vec())?;
     }
+    add_ui_atlas_source(&mut assets, &mut remaining)?;
     encode_zip(assets).map_err(|error| format!("cannot encode resource pack: {error}"))
+}
+
+fn add_ui_atlas_source(
+    assets: &mut BTreeMap<String, Vec<u8>>,
+    remaining: &mut u64,
+) -> Result<(), String> {
+    if !assets.keys().any(|path| {
+        path.strip_prefix("assets/")
+            .and_then(|path| path.split_once('/'))
+            .is_some_and(|(_, file)| file.starts_with("textures/ui/") && file.ends_with(".png"))
+    }) {
+        return Ok(());
+    }
+
+    // Vanilla reads the atlas sources from the whole pack stack, so we only add the UI directory.
+    let existing = assets.get(ITEM_ATLAS_PATH);
+    let mut atlas = match existing {
+        Some(bytes) => serde_json::from_slice(bytes)
+            .map_err(|error| format!("cannot read item atlas {ITEM_ATLAS_PATH}: {error}"))?,
+        None => json!({ "sources": [] }),
+    };
+    let sources = atlas
+        .get_mut("sources")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| format!("item atlas {ITEM_ATLAS_PATH} must contain a sources array"))?;
+    let source = json!({ "type": "minecraft:directory", "source": "ui", "prefix": "ui/" });
+    if sources.contains(&source) {
+        return Ok(());
+    }
+    sources.push(source);
+    let bytes = serde_json::to_vec(&atlas)
+        .map_err(|error| format!("cannot encode item atlas {ITEM_ATLAS_PATH}: {error}"))?;
+    let previous_size = existing.map_or(0, Vec::len);
+    spend_asset_bytes(remaining, bytes.len().saturating_sub(previous_size) as u64)?;
+    assets.insert(ITEM_ATLAS_PATH.to_owned(), bytes);
+    Ok(())
 }
 
 fn spend_asset_bytes(remaining: &mut u64, size: u64) -> Result<(), String> {

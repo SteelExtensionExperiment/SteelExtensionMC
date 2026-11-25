@@ -31,6 +31,33 @@ fn zip_merge_is_deterministic_and_rejects_conflicting_assets() {
     assert_eq!(merged, original);
 }
 
+#[test]
+fn combined_zip_adds_the_ui_directory_to_the_item_atlas() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let input = directory.path().join("menu.zip");
+    let texture = "assets/test_menu/textures/ui/reactor/gauge.png";
+    let extra_source = json!({ "type": "minecraft:single", "resource": "test_menu:extra" });
+    for extra_sources in [vec![], vec![extra_source]] {
+        let mut files = BTreeMap::from([(texture.to_owned(), b"gauge".to_vec())]);
+        if !extra_sources.is_empty() {
+            files.insert(
+                ITEM_ATLAS_PATH.to_owned(),
+                serde_json::to_vec(&json!({ "sources": extra_sources }))?,
+            );
+        }
+        std::fs::write(&input, encode_zip(files)?)?;
+        let output = build_zip(&ResourcePackAssets::default(), std::slice::from_ref(&input))?;
+        let mut pack = ZipArchive::new(Cursor::new(output))?;
+        assert!(pack.by_name(texture).is_ok());
+        let actual: Value = serde_json::from_reader(pack.by_name(ITEM_ATLAS_PATH)?)?;
+        let mut expected = extra_sources;
+        expected.push(json!({ "type": "minecraft:directory", "source": "ui", "prefix": "ui/" }));
+        assert_eq!(actual, json!({ "sources": expected }));
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn embedded_and_external_modes_offer_the_exported_pack() {
     static ASSETS: std::sync::LazyLock<ResourcePackAssets> =

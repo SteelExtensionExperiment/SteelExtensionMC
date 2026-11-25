@@ -66,14 +66,39 @@ fn ui_demos_animate_and_route_buttons_with_both_pack_modes() -> Result<(), Strin
     )?;
     assert_eq!(loaded.order, ["steel-ui", "steel-ui-demo"]);
     let assets = REGISTRY.client_content.resource_pack();
-    assert!(assets.files().any(|(path, _)| {
-        path == "assets/steel-ui-demo/textures/item/ui/furnace/start-flame.png"
-    }));
+    assert!(
+        assets.files().any(|(path, _)| {
+            path == "assets/steel-ui-demo/textures/ui/furnace/start-flame.png"
+        })
+    );
     assert!(
         assets
             .files()
             .any(|(path, _)| { path == "assets/steel-ui-demo/items/ui/furnace/energy-pulse.json" })
     );
+    for (path, field, expected) in [
+        (
+            "assets/steel-ui-demo/models/item/ui/furnace/start-flame.json",
+            "/textures/layer0",
+            START_MODEL,
+        ),
+        (
+            "assets/steel-ui-demo/items/ui/furnace/start-flame.json",
+            "/model/model",
+            "steel-ui-demo:item/ui/furnace/start-flame",
+        ),
+    ] {
+        let (_, bytes) = assets
+            .files()
+            .find(|(asset, _)| *asset == path)
+            .ok_or(path)?;
+        let json: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+        assert_eq!(
+            json.pointer(field).and_then(serde_json::Value::as_str),
+            Some(expected)
+        );
+    }
     let font = assets
         .files()
         .find(|(path, _)| *path == "assets/steel-ui-demo/font/ui/reactor.json")
@@ -81,17 +106,16 @@ fn ui_demos_animate_and_route_buttons_with_both_pack_modes() -> Result<(), Strin
     let font: serde_json::Value =
         serde_json::from_slice(font.1).map_err(|error| error.to_string())?;
     assert_eq!(font["providers"][0]["advances"]["\u{e000}"], -8);
-    assert_eq!(
-        font["providers"][1]["file"],
-        "steel-ui-demo:gui/ui/reactor.png"
-    );
+    assert_eq!(font["providers"][1]["file"], "steel-ui-demo:ui/reactor.png");
     assert_eq!(font["providers"][1]["chars"][0], "\u{e001}");
     assert!(
         assets
             .files()
-            .any(|(path, _)| path == "assets/steel-ui-demo/textures/gui/ui/reactor.png")
+            .any(|(path, _)| path == "assets/steel-ui-demo/textures/ui/reactor.png")
     );
     for gauge in ["energy-fill", "heat-fill"] {
+        let texture_path = format!("assets/steel-ui-demo/textures/ui/reactor/{gauge}.png");
+        assert!(assets.files().any(|(path, _)| path == texture_path));
         for level in [1, GAUGE_LEVELS] {
             let path = format!("assets/steel-ui-demo/items/ui/reactor/{gauge}-{level}.json");
             let (_, definition) = assets
@@ -111,7 +135,7 @@ fn ui_demos_animate_and_route_buttons_with_both_pack_modes() -> Result<(), Strin
                 serde_json::from_slice(model).map_err(|error| error.to_string())?;
             assert_eq!(
                 model["textures"]["fill"],
-                format!("steel-ui-demo:item/ui/reactor/{gauge}")
+                format!("steel-ui-demo:ui/reactor/{gauge}")
             );
             assert_eq!(
                 model["elements"][0]["faces"]["north"]["uv"],

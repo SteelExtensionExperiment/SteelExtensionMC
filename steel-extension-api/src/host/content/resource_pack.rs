@@ -55,13 +55,6 @@ pub(crate) fn register_textured_cube(
     registry.register_textured_block_definition(block, placing, files, fallback)
 }
 
-fn texture_path(model: &Identifier, category: &str) -> String {
-    format!(
-        "assets/{}/textures/{category}/{}.png",
-        model.namespace, model.path
-    )
-}
-
 fn texture_files(
     model: &Identifier,
     bytes: &[u8],
@@ -71,24 +64,30 @@ fn texture_files(
         return Err(format!("texture {model} is not a PNG"));
     }
     let category = if cube { "block" } else { "item" };
-    let texture = format!("{}:{category}/{}", model.namespace, model.path);
+    let model_path = format!("{category}/{}", model.path);
+    let sprite_path = if !cube && model.path.starts_with("ui/") {
+        model.path.as_ref()
+    } else {
+        &model_path
+    };
+    let texture = format!("{}:{sprite_path}", model.namespace);
     let model_data = if cube {
         json!({"parent": "minecraft:block/cube_all", "textures": {"all": texture}})
     } else {
         json!({"parent": "minecraft:item/generated", "textures": {"layer0": texture}})
     };
     Ok(BTreeMap::from([
-        (texture_path(model, category), bytes.to_vec()),
         (
-            format!(
-                "assets/{}/models/{category}/{}.json",
-                model.namespace, model.path
-            ),
+            format!("assets/{}/textures/{sprite_path}.png", model.namespace),
+            bytes.to_vec(),
+        ),
+        (
+            format!("assets/{}/models/{model_path}.json", model.namespace),
             model_data.to_string().into_bytes(),
         ),
         (
             format!("assets/{}/items/{}.json", model.namespace, model.path),
-            json!({"model": {"type": "minecraft:model", "model": texture}})
+            json!({"model": {"type": "minecraft:model", "model": format!("{}:{model_path}", model.namespace)}})
                 .to_string()
                 .into_bytes(),
         ),
