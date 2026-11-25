@@ -170,7 +170,7 @@ fn zero_seed_barrels_share_the_named_stream_for_generation_and_placement() {
         let _domains = DomainRandomSequences::load(&worlds)
             .await
             .expect("bind streams");
-        let primary = &worlds.default_world("barrel_sequences").expect("primary");
+        let primary = worlds.default_world("barrel_sequences").expect("primary");
         let expected = RandomSequences::from_persistent(
             primary.level_data.read().seed(),
             PersistentRandomSequences::default(),
@@ -178,13 +178,10 @@ fn zero_seed_barrels_share_the_named_stream_for_generation_and_placement() {
         .expect("settings");
         let table = &vanilla_loot_tables::CHESTS_SPAWN_BONUS_CHEST;
         let sequence = table.random_sequence.as_ref().expect("named sequence");
-        for world in [
-            primary,
-            &worlds
-                .get(&Identifier::new_static("barrel_sequences", "nether"))
-                .expect("nether"),
-        ] {
-            let world = &world;
+        let nether = worlds
+            .get(&Identifier::new_static("barrel_sequences", "nether"))
+            .expect("nether");
+        for world in [&primary, &nether] {
             let barrel = BarrelBlockEntity::new(
                 Arc::downgrade(world),
                 BlockPos::new(1, 64, 1),
@@ -235,7 +232,7 @@ fn advancement_rewards_continue_the_named_loot_stream() {
     let _domains = runtime
         .block_on(DomainRandomSequences::load(&worlds))
         .expect("bind streams");
-    let world = &worlds
+    let world = worlds
         .default_world("advancement_sequences")
         .expect("world");
     let player = TestPlayerBuilder::new(Arc::clone(&world), "Player", 1).build();
@@ -302,7 +299,7 @@ fn domain_worlds_share_sequences_and_domains_stay_isolated() {
         let domains = DomainRandomSequences::load(&worlds)
             .await
             .expect("load domains");
-        let a = &worlds.default_world("loot_a").expect("default a");
+        let a = worlds.default_world("loot_a").expect("default a");
         let table = &vanilla_loot_tables::CHESTS_SPAWN_BONUS_CHEST;
         let mut expected_seeded = LegacyRandom::from_seed(42);
         assert_eq!(
@@ -317,11 +314,11 @@ fn domain_worlds_share_sequences_and_domains_stay_isolated() {
                 .expect("seeded draws do not dirty named streams"),
             0
         );
-        let nether = &worlds
+        let nether = worlds
             .get(&Identifier::new_static("loot_a", "nether"))
             .expect("nether");
-        let a_sequences = bound(a);
-        let n_sequences = bound(nether);
+        let a_sequences = bound(&a);
+        let n_sequences = bound(&nether);
         let b_sequences = bound(&worlds.default_world("loot_b").expect("default b"));
         assert!(Arc::ptr_eq(&a_sequences, &n_sequences));
         assert!(!Arc::ptr_eq(&a_sequences, &b_sequences));
