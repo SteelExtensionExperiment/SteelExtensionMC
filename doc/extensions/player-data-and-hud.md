@@ -1,8 +1,9 @@
 # Player data and shared HUD
 
 These APIs run entirely on the server. Vanilla clients receive ordinary
-scoreboard, boss-bar and tab-list packets. They need neither client mods nor
-resource packs. Templates are evaluated before packets are sent.
+scoreboard, boss-bar and tab-list packets. Extensions can use a resource pack
+to add artwork, with text fallbacks for other clients. Templates are evaluated
+before packets are sent.
 
 ## Player data
 
@@ -36,12 +37,14 @@ Register more sources with `Hooks::hud_source` or
 identity. Source names visible in owner configuration are
 `extension-name:local-source`, for example `magic:default`.
 
-Each source supports sidebar sections, tab header/footer sections, and boss
-bars with all colors, segment styles and three vanilla flags. Bar UUIDs are
+Each source supports sidebar sections, action-bar text, tab header/footer
+sections, and boss bars with all colors, segment styles and three vanilla
+flags. Bar UUIDs are
 local to a source: identical UUIDs from two extensions produce different bars.
 Clear methods remove only the selected source/resource. Updates send only
 changed fields and lines, and presentation lives on the connection across
-respawns.
+respawns. The action bar refreshes while visible. Temporary action-bar messages
+take precedence for their vanilla display duration.
 
 Sections combine in lexical source order by default. The server's TPS tab
 information contributes alongside extensions. An empty section title keeps its
@@ -50,6 +53,45 @@ The vanilla sidebar limit is 15 lines. Overflow reports the sources and retains
 the last valid sidebar;
 unrelated bar/tab changes can still succeed. Desired contributions remain
 registered so owner layout changes can resolve the conflict.
+
+## Resource-pack artwork
+
+Package PNGs in the extension's `assets/` directory or refer to vanilla
+textures. `HudSprites` generates a namespaced bitmap font during content
+registration. Give each sprite set its own key. The same glyph can be reused
+in different sets because Minecraft looks it up within the selected font.
+
+```rust
+use steel_extension_api::hud::{HudSprites, HudText};
+
+const MANA: HudSprites<'static> =
+    HudSprites::new("magic:hud/mana").with_gauge_strip("magic:hud/mana.png");
+
+// In the content registration callback, with assets/magic/textures/hud/mana.png packaged.
+MANA.register(&mut registry)?;
+
+// When publishing a HUD template.
+let gauge = MANA.gauge("player_mana", 20)?;
+let meter = HudText::new(&gauge.vanilla().color("blue").to_json())
+    .with_resource_pack(&gauge.packed().to_json());
+source
+    .set_action_bar(server, player, meter)
+    .match_owned(Ok, |error| Err(error.to_string()))?;
+```
+
+Use `with_gauge_sprites` for separate filled and empty PNGs. Declare other
+artwork with `HudIcon::new` and `with_icons`, then resolve its component with
+`icon(name)`. Style and position the component with the surrounding `Text`.
+Steel selects the packed template after the client loads its pack and uses the
+vanilla template if the pack is disabled, declined, or fails to load. Raw font
+assets and explicit font IDs are also available for custom owner templates.
+
+`set_sidebar_with_pack` selects a template for the title and each line.
+`set_tab_list_with_pack` does the same for the header and footer.
+`set_boss_bar_with_pack` and `set_gauge_bar_with_pack` select the title artwork
+and use the native boss-bar rules for fill, style, and flags. Every selected
+template goes through the same data expressions, source ordering, and owner
+layout rules as the plain HUD.
 
 ## Data expressions
 
@@ -78,7 +120,8 @@ For the `magic-example` and `creatures-example` examples in `config/config.toml`
 order = ["creatures-example:default", "magic-example:default"]
 sidebar_title = "Adventure"
 # To replace all default sidebar sections with your own layout:
-# sidebar_lines = ["Mana: ${player_mana}/${player_max_mana}", "${bar(player_mana, 20)}"]
+# sidebar_lines = ["${creatures:state/party/0/label}"]
+# action_bar = "Mana: ${player_mana}/${player_max_mana} ${bar(player_mana, 20)}"
 # hidden = ["magic-example:default"]
 # hidden = ["steel:server"] # suppress the default server tab information
 
@@ -89,9 +132,9 @@ player_max_mana = "magic:state/mana/maximum"
 ```
 
 For a complete custom combination, merge [combined-hud.toml](examples/combined-hud.toml)
-into that file. It replaces the sidebar with a colored mana meter and the names
-and health of the first three party slots, and mixes creature and mana data in
-the tab header. Edit the templates to reorder, interleave, or combine fields
+into that file. It puts the names and health of the first three party slots in
+the sidebar and mixes creature and mana data in the tab header. Edit the
+templates to reorder, interleave, or combine fields
 from either extension. Empty slots suppress their rows. Extensions keep
 publishing their own data and defaults; they do not need to communicate.
 
@@ -100,9 +143,13 @@ with the owner's exact layout, so fields from different extensions can appear
 on the same line. Omitting it restores the automatic combination. Alias bindings
 select the data provider explicitly when names conflict.
 
-`tab_header` and `tab_footer` replace the combined defaults with owner templates.
+`action_bar`, `tab_header`, and `tab_footer` replace the corresponding combined
+defaults with owner templates.
 For extensions that publish boss bars, `boss_bars` settings use keys of the form
 `extension-name:source/local-uuid` and support `title`, `gauge`, and `hidden`.
+For any owner text template, use a plain string or an inline table with
+`vanilla` and `packed` strings. The combined example uses this for the creature
+rows and tab footer so the owner layout can use the extensions' fonts.
 Configuration takes effect on restart. `Server::hud_conflicts` exposes current
 diagnostics; changed failures are also logged once.
 
@@ -213,10 +260,11 @@ payloads remain opaque to core. Expiration runs in an SDK tick subscription.
 [Magic](../../extension-example/magic/README.md) are separately linked libraries
 with no mutual dependency. Their integration test drives actual client packet
 handlers, native impacts, all nine spells and both HUD contributions together.
-Neither needs a modified client or resource pack.
-Their default sidebar combines mana (current/maximum and a text meter) with the
-first three captured creatures (name, current/maximum health, ball grade and
-deployment status). All six party slots remain available in the creature menu.
+Both support unmodified clients and provide a HUD without the resource pack.
+Magic displays current/maximum mana and a meter in the action bar above armor.
+Creatures displays the first three captured creatures in the sidebar, with
+name, current/maximum health, ball grade and deployment status. All six party
+slots remain available in the creature menu.
 
 Player compounds use player format 10. Temporary terrain uses chunk region
 format 25. This early-development change does not migrate older formats; keep

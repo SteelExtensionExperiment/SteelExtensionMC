@@ -30,7 +30,7 @@ pub(crate) use stack::has_server_item;
 pub use stack::{client_stack, client_template, restore_client_stack};
 
 use glam::{Quat, Vec3};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use steel_utils::BlockStateId;
 
 use crate::{
@@ -91,7 +91,7 @@ impl BlockItemDisplay {
 }
 
 /// Alternate placement for the same display with the resource pack loaded.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BlockDisplayTransform {
     pub translation: Vec3,
     pub scale: Vec3,
@@ -99,7 +99,9 @@ pub struct BlockDisplayTransform {
 }
 
 impl BlockDisplayTransform {
-    pub(super) fn is_valid(self) -> bool {
+    /// Whether the transform can be sent to a client display entity.
+    #[must_use]
+    pub fn is_valid(self) -> bool {
         self.translation.is_finite()
             && self.scale.is_finite()
             && self.scale.min_element() > 0.0
@@ -165,6 +167,7 @@ pub struct ClientContent {
     resource_pack: ResourcePackAssets,
     items: FxHashMap<usize, ItemRef>,
     blocks: FxHashMap<usize, ClientBlock>,
+    construction_parts: FxHashSet<usize>,
     /// Keyed by both the source and the flowing fluid id.
     fluids: FxHashMap<usize, &'static ClientFluid>,
     /// Each registered pair once, in registration order.
@@ -259,6 +262,12 @@ impl ClientContent {
     #[must_use]
     pub fn block(&self, block: BlockRef) -> Option<&ClientBlock> {
         self.blocks.get(&block.id())
+    }
+
+    /// Whether the ordinary displays decorate an incomplete multiblock for packed clients.
+    #[must_use]
+    pub fn is_construction_part(&self, block: BlockRef) -> bool {
+        self.construction_parts.contains(&block.id())
     }
 
     #[must_use]

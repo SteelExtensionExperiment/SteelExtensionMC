@@ -5,13 +5,16 @@
 //! observed through the inventory click event, which fires before any container is locked,
 //! so handlers may freely change inventories, open other menus or close this one.
 
+use smallvec::{SmallVec, smallvec};
 use steel_registry::vanilla_menu_types;
 
 use crate::inventory::prelude::*;
 use crate::player::player_inventory::PlayerInventory;
 
 /// Menu kind that treats every slot as a button.
-pub struct DisplayKind;
+pub struct DisplayKind {
+    container: ContainerId,
+}
 
 // SAFETY: This Steel-owned key uniquely identifies the concrete menu kind within the process.
 unsafe impl steel_utils::DowncastType for DisplayKind {
@@ -20,6 +23,10 @@ unsafe impl steel_utils::DowncastType for DisplayKind {
 }
 
 impl MenuKind for DisplayKind {
+    fn opened_containers(&self) -> SmallVec<[ContainerId; 2]> {
+        smallvec![self.container]
+    }
+
     fn on_slot_clicked(
         &mut self,
         _behavior: &mut MenuBehavior,
@@ -58,8 +65,12 @@ pub fn display_chest(
         5 => &vanilla_menu_types::GENERIC_9X5,
         _ => &vanilla_menu_types::GENERIC_9X6,
     };
+    let container = container.into();
+    let kind = DisplayKind {
+        container: container.container_id(),
+    };
     let mut builder = MenuBuilder::new(menu_type, container_id);
-    builder.section(container.into(), rows * 9);
+    builder.section(container, rows * 9);
     builder.player_inventory(inventory);
-    builder.build(DisplayKind)
+    builder.build(kind)
 }

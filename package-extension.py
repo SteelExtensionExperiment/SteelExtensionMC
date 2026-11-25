@@ -6,6 +6,7 @@ import json
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
+import tempfile
 import tomllib
 import zipfile
 
@@ -13,21 +14,27 @@ import zipfile
 def package(args):
     crate = Path(args.crate).resolve()
     cargo_manifest = crate / "Cargo.toml"
-    manifest = tomllib.loads((crate / "extension.toml").read_text())
+    try:
+        manifest = tomllib.loads((crate / "extension.toml").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        manifest = {}
     target_args = ["--target", args.target] if args.target else []
     cfg = subprocess.check_output(["rustc", "--print", "cfg", *target_args], text=True)
     values = dict(line.split("=", 1) for line in cfg.splitlines() if "=" in line)
     platform = f"{json.loads(values['target_os'])}-{json.loads(values['target_arch'])}"
-    member = manifest["targets"][platform]
-    if "\\" in member or not member or PurePosixPath(member).is_absolute() or any(
-        part in (".", "..") for part in member.split("/")
-    ):
-        raise ValueError("target library must have an enclosed, relative archive path")
     metadata = json.loads(subprocess.check_output([
         "cargo", "metadata", "--no-deps", "--format-version", "1",
         "--manifest-path", str(cargo_manifest),
     ], text=True))
     selected = next(p for p in metadata["packages"] if Path(p["manifest_path"]).resolve() == cargo_manifest)
+    package_info = manifest.get("package", {})
+    targets = manifest.get("targets", {})
+    if not isinstance(package_info, dict) or not isinstance(targets, dict):
+        raise ValueError("extension.toml package and targets overrides must be tables")
+    name = package_info.get("name", selected["name"])
+    version = package_info.get("version", selected["version"])
+    if not all(isinstance(value, str) and value for value in (name, version)):
+        raise ValueError("extension package name and version must be nonempty strings")
     command = ["cargo", "build", "--manifest-path", str(cargo_manifest), "--package", selected["name"], "--message-format=json-render-diagnostics", *target_args]
     if not args.debug:
         command.append("--release")
@@ -45,26 +52,33 @@ def package(args):
         raise RuntimeError("extension build failed")
     if len(libraries) != 1:
         raise ValueError("extension must build exactly one native cdylib")
+    member = targets.get(platform, libraries[0].name)
+    if not isinstance(member, str) or "\\" in member or any(
+        part in ("", ".", "..") for part in member.split("/")
+    ) or PurePosixPath(member).is_absolute():
+        raise ValueError("target library must have an enclosed, relative archive path")
     # A single-target package advertises only the library actually included.
-    package_info = manifest["package"]
     archive_manifest = "\n".join([
-        "[package]", f"name = {json.dumps(package_info['name'])}",
-        f"version = {json.dumps(package_info['version'])}", "", "[targets]",
+        "[package]", f"name = {json.dumps(name)}",
+        f"version = {json.dumps(version)}", "", "[targets]",
         f"{json.dumps(platform)} = {json.dumps(member)}", "",
     ])
     output = Path(args.output) if args.output else Path("extensions") / f"{selected['name']}.zip"
     output.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("extension.toml", archive_manifest)
-        archive.write(libraries[0], member)
-        for asset in sorted((crate / "assets").rglob("*")):
-            if asset.is_symlink():
-                raise ValueError(f"resource pack assets cannot be symbolic links: {asset}")
-            if asset.is_file():
-                relative = asset.relative_to(crate)
-                if len(relative.parts) < 3:
-                    raise ValueError(f"resource pack asset needs a namespace directory: {relative}")
-                archive.write(asset, relative.as_posix())
+    with tempfile.TemporaryDirectory(dir=output.parent) as directory:
+        pending = Path(directory) / output.name
+        with zipfile.ZipFile(pending, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("extension.toml", archive_manifest)
+            archive.write(libraries[0], member)
+            for asset in sorted((crate / "assets").rglob("*")):
+                if asset.is_symlink():
+                    raise ValueError(f"resource pack assets cannot be symbolic links: {asset}")
+                if asset.is_file():
+                    relative = asset.relative_to(crate)
+                    if len(relative.parts) < 3:
+                        raise ValueError(f"resource pack asset needs a namespace directory: {relative}")
+                    archive.write(asset, relative.as_posix())
+        pending.replace(output)
     print(output)
 
 

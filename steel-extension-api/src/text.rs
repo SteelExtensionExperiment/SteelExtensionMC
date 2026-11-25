@@ -11,6 +11,7 @@ use core::fmt::Write as _;
 pub struct Text {
     text: String,
     color: Option<String>,
+    font: Option<String>,
     flags: [Option<bool>; 5],
     click: Option<(&'static str, String)>,
     hover: Option<Box<Text>>,
@@ -45,6 +46,13 @@ impl Text {
     #[must_use]
     pub fn color(mut self, color: impl Into<String>) -> Self {
         self.color = Some(color.into());
+        self
+    }
+
+    /// Selects a namespaced font from the client's resource packs.
+    #[must_use]
+    pub fn font(mut self, font: impl Into<String>) -> Self {
+        self.font = Some(font.into());
         self
     }
 
@@ -133,6 +141,10 @@ impl Text {
             out.push_str(",\"color\":");
             write_string(out, color);
         }
+        if let Some(font) = &self.font {
+            out.push_str(",\"font\":");
+            write_string(out, font);
+        }
         for (flag, name) in self.flags.iter().zip(FLAG_NAMES) {
             if let Some(value) = flag {
                 let _ = write!(out, ",\"{name}\":{value}");
@@ -195,7 +207,7 @@ impl From<String> for Text {
     }
 }
 
-fn write_string(out: &mut String, value: &str) {
+pub(crate) fn write_string(out: &mut String, value: &str) {
     out.push('"');
     for character in value.chars() {
         match character {
@@ -339,6 +351,29 @@ mod tests {
             json,
             r#"{"text":"say \"hi\"\n","color":"gold","bold":true,"click_event":{"action":"run_command","command":"/spawn"},"hover_event":{"action":"show_text","value":{"text":"go"}}}"#
         );
+    }
+
+    #[cfg(feature = "host")]
+    #[test]
+    fn host_decodes_rgb_in_child_and_hover_components() {
+        use crate::host::events::parse_text;
+        use text_components::{TextComponent, format::Color, interactivity::HoverEvent};
+
+        let json = Text::new("Menu")
+            .append(Text::new(" ready").color("#12ab34").italic(false))
+            .hover(Text::new("Details").color("#445566"))
+            .to_json();
+        let parsed = parse_text(&json);
+        assert_eq!(parsed.content, TextComponent::plain("Menu").content);
+        let [child] = parsed.children.as_slice() else {
+            panic!("expected one child component");
+        };
+        assert_eq!(child.format.color, Some(Color::Rgb(0x12, 0xab, 0x34)));
+        assert_eq!(child.format.italic, Some(false));
+        let Some(HoverEvent::ShowText { value }) = parsed.interactions.hover else {
+            panic!("expected a hover text component");
+        };
+        assert_eq!(value.format.color, Some(Color::Rgb(0x44, 0x55, 0x66)));
     }
 
     #[test]

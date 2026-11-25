@@ -24,7 +24,6 @@ Create this directory structure:
 ```text
 extension-example/hello-extension/
 ├── Cargo.toml
-├── extension.toml
 └── src/
     └── lib.rs
 ```
@@ -105,7 +104,12 @@ fn init(context: ExtensionContext<'_>) -> ApiResult<()> {
         .into()
 }
 
-steel_extension_api::export_extension!("hello", pre_init, init);
+steel_extension_api::export_extension! {
+    depends: [],
+    soft_depends: [],
+    pre_init: pre_init,
+    init: init,
+}
 ```
 
 `pre_init` subscribes to command registration. Steel later passes the actual
@@ -123,9 +127,15 @@ code for this extension. Both entrypoints may also return any
 
 This example uses the low-level command binding to show the boundary. Most
 extensions use the closure helpers instead (`hooks.on_commands`, typed
-`command::CommandBuilder` trees, `hooks.on_*` for gameplay events); see the
-[API crate README](../../steel-extension-api/README.md#hello-world). The long form of
-the macro also declares a version and dependencies:
+`command::CommandBuilder` trees, and `hooks.on_*` for gameplay events). The
+[API crate README](../../steel-extension-api/README.md#hello-world) has examples.
+Use `hooks.on_content` to subscribe ordinary Rust functions or closures to
+content registration. `ApiResultExt::into_result()` converts a registry call's
+result for use with `?`. Steel still runs the callbacks before the registry
+freezes. See [Magic's registration](../../extension-example/magic/src/lib.rs).
+
+The export above uses Cargo's name and version. You can explicitly override
+both when your library package name and runtime extension name differ:
 
 ```rust
 steel_extension_api::export_extension! {
@@ -138,29 +148,6 @@ steel_extension_api::export_extension! {
 }
 ```
 
-## Describe the package
-
-Put this in `extension-example/hello-extension/extension.toml`:
-
-```toml
-[package]
-name = "hello"
-version = "0.1.0"
-
-[targets]
-linux-x86_64 = "libhello_extension.so"
-linux-aarch64 = "libhello_extension.so"
-macos-x86_64 = "libhello_extension.dylib"
-macos-aarch64 = "libhello_extension.dylib"
-windows-x86_64 = "hello_extension.dll"
-windows-aarch64 = "hello_extension.dll"
-```
-
-The package name `hello` must match `export_extension!("hello", ...)`. The Cargo
-crate name determines the default native library name and output ZIP filename;
-it can differ from the descriptor name. Target keys use Rust operating system
-and architecture names.
-
 ## Build, package, and install
 
 With Python 3.11 or newer, run:
@@ -170,8 +157,12 @@ python3 package-extension.py extension-example/hello-extension --debug
 ```
 
 This builds the extension in a separate Cargo invocation and writes
-`extensions/hello-extension.zip`. The archive contains `extension.toml` and the
-library for the target actually built. Omit `--debug` for a release build. Use
+`extensions/hello-extension.zip`. The packager generates the archive's
+`extension.toml` from Cargo's package metadata and the library Cargo built.
+Add a source `extension.toml` only to override a value. For example,
+`[package]` can override `name` or `version`, and `[targets]` can set the
+library's archive path for a particular Rust OS and architecture. An overridden
+name must match the descriptor. Omit `--debug` for a release build. Use
 `--target <rust-target-triple>` for a configured cross-compilation toolchain, or
 `--output <path.zip>` to choose the archive path.
 
@@ -191,7 +182,7 @@ native libraries in `./extensions` in filename order, skipping files already
 selected by path, and initializes everything in dependency order. An extension
 without an `[extensions.config]` table reads `extensions/<name>/config.toml`,
 created empty on first start; this example requires a `message`, so either add
-the table above or write `message = "..."` into `extensions/hello/config.toml`.
+the table above or write `message = "..."` into `extensions/hello-extension/config.toml`.
 
 Start Steel normally, connect as a player, and run `/hello ping`. The namespaced
 form `/hello:hello ping` is also available. This command permits players by
@@ -209,7 +200,7 @@ On Linux, change the configured path to
 `libhello_extension.dylib`; on Windows, use `hello_extension.dll`. Keep the same
 configuration section. You can also copy the library itself into `./extensions`.
 Move an older ZIP out of `./extensions` when selecting a raw library: two files
-declaring `hello` are both skipped with a warning.
+declaring `hello-extension` are both skipped with a warning.
 
 ## Rebuild and troubleshoot
 
@@ -223,10 +214,10 @@ trusted. ABI checks detect incompatible boundary signatures, not malicious code.
 | Skipped: not a Steel extension | Build a `cdylib` and include `export_extension!`. |
 | Skipped: built for an older Steel extension API | Rebuild against the server's API checkout. |
 | Incompatible host signature | Rebuild against the server's API checkout and pinned Stabby revision, with `host` disabled. |
-| Manifest name differs from descriptor | Use `hello` in both the package manifest and `export_extension!`. |
+| Manifest name differs from descriptor | Use Cargo's name for both, or supply matching overrides in `extension.toml` and `export_extension!`. |
 | Skipped: another file also declares the extension | Remove extra packages or libraries with the same descriptor name, including ZIPs discovered alongside a raw library. |
 | Skipped: requires missing extension | Install the extension named in the message, or remove it from `depends`. |
-| Unsupported target or missing library | Package for the server's operating system and architecture; include the matching target entry. |
+| Unsupported target or missing library | Package for the server's operating system and architecture with `--target`. |
 | Configuration parsing failed | Add `[extensions.config]` with `message`; match the extension's own schema. |
 | Command unavailable | Connect as a player, check command permissions, and check startup logs for registration collisions. |
 

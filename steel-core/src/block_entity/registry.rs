@@ -10,7 +10,6 @@ use steel_registry::vanilla_block_entity_types;
 use steel_registry::{REGISTRY, RegistryEntry, RegistryExt};
 use steel_utils::{BlockPos, BlockStateId};
 
-use super::SharedBlockEntity;
 #[cfg_attr(
     not(test),
     expect(
@@ -19,6 +18,7 @@ use super::SharedBlockEntity;
     )
 )]
 use super::entities::*;
+use super::{SharedBlockEntity, StorageBlockEntity};
 use crate::world::World;
 
 /// Factory function type for creating block entities.
@@ -70,6 +70,18 @@ impl BlockEntityRegistry {
         pos: BlockPos,
         state: BlockStateId,
     ) -> Option<SharedBlockEntity> {
+        if let Some(slots) = REGISTRY
+            .block_entity_types
+            .storage_capacity(block_entity_type)
+        {
+            return Some(Arc::new(StorageBlockEntity::new(
+                block_entity_type,
+                slots,
+                level,
+                pos,
+                state,
+            )));
+        }
         let id = block_entity_type.id();
         self.entries.get(id)?.factory.map(|f| f(level, pos, state))
     }
@@ -87,8 +99,22 @@ impl BlockEntityRegistry {
         pos: BlockPos,
         state: BlockStateId,
     ) -> SharedBlockEntity {
-        let id = block_entity_type.id();
-        if let Some(factory) = self.entries.get(id).and_then(|entry| entry.factory) {
+        if let Some(slots) = REGISTRY
+            .block_entity_types
+            .storage_capacity(block_entity_type)
+        {
+            Arc::new(StorageBlockEntity::new(
+                block_entity_type,
+                slots,
+                level,
+                pos,
+                state,
+            ))
+        } else if let Some(factory) = self
+            .entries
+            .get(block_entity_type.id())
+            .and_then(|entry| entry.factory)
+        {
             factory(level, pos, state)
         } else {
             Arc::new(UnimplementedBlockEntity::new(
@@ -139,7 +165,11 @@ impl BlockEntityRegistry {
     #[must_use]
     pub fn has_factory(&self, block_entity_type: BlockEntityTypeRef) -> bool {
         let id = block_entity_type.id();
-        self.entries.get(id).is_some_and(|e| e.factory.is_some())
+        REGISTRY
+            .block_entity_types
+            .storage_capacity(block_entity_type)
+            .is_some()
+            || self.entries.get(id).is_some_and(|e| e.factory.is_some())
     }
 }
 

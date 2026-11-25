@@ -2,13 +2,17 @@
 use crate::hooks::{self, ServerStopAction, ServerTickAction};
 use crate::{ApiResult, ExtensionContext, ExtensionInit, Server};
 use stabby::string::String as ApiString;
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    sync::Arc,
+};
 use steel_core::{
     behavior::{BLOCK_BEHAVIORS, FLUID_BEHAVIORS},
     extension::{ExtensionHooks, ServerStopHandler, ServerTickHandler},
     server::Server as CoreServer,
 };
-use steel_utils::locks::SyncMutex;
+use steel_utils::{Identifier, locks::SyncMutex};
 
 #[derive(Default)]
 struct RegistrationStatus {
@@ -22,6 +26,7 @@ pub(crate) struct ExtensionState {
     pub name: &'static str,
     pub version: &'static str,
     pub config: String,
+    menu_asset_ids: SyncMutex<BTreeSet<String>>,
     status: SyncMutex<RegistrationStatus>,
     shutdown: SyncMutex<Vec<(ShutdownCallback, u64)>>,
 }
@@ -31,9 +36,33 @@ impl ExtensionState {
             name,
             version,
             config: config.to_owned(),
+            menu_asset_ids: SyncMutex::default(),
             status: SyncMutex::new(RegistrationStatus::default()),
             shutdown: SyncMutex::new(Vec::new()),
         }
+    }
+    pub(crate) fn claim_menu_assets(&self, id: &str) -> Result<String, String> {
+        if id.is_empty()
+            || !id.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+            })
+        {
+            return Err(format!("invalid local menu ID {id:?}"));
+        }
+        if self.name.is_empty()
+            || matches!(self.name, "." | Identifier::VANILLA_NAMESPACE)
+            || !Identifier::validate_namespace(self.name)
+        {
+            return Err(format!(
+                "extension name {:?} cannot be used as a menu asset namespace",
+                self.name
+            ));
+        }
+        let key = format!("{}:ui/{id}", self.name);
+        if !self.menu_asset_ids.lock().insert(id.to_owned()) {
+            return Err(format!("menu assets already claimed for {key}"));
+        }
+        Ok(key)
     }
     pub(crate) fn begin_registration(&self) {
         self.status.lock().pending += 1;
@@ -305,6 +334,19 @@ pub(crate) fn resolve(extensions: &[DependencyInfo<'_>]) -> Result<Resolution, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_menu_ids_are_unique_only_within_the_registering_extension() -> Result<(), String> {
+        let first = ExtensionState::new("first", "1", "");
+        let second = ExtensionState::new("second", "1", "");
+
+        assert_eq!(first.claim_menu_assets("lobby")?, "first:ui/lobby");
+        assert!(first.claim_menu_assets("lobby").is_err());
+        assert_eq!(second.claim_menu_assets("lobby")?, "second:ui/lobby");
+        assert!(second.claim_menu_assets("first:ui/lobby").is_err());
+        assert!(second.claim_menu_assets("../lobby").is_err());
+        Ok(())
+    }
 
     fn info<'a>(name: &'a str, depends: &[&'a str], soft: &[&'a str]) -> DependencyInfo<'a> {
         DependencyInfo {

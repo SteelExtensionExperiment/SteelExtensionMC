@@ -5,7 +5,11 @@
 //! client is resynchronized) and calls the extension's handler. The event fires before any
 //! container lock is taken, so handlers may change inventories or open another menu.
 use super::{events::click_kind, events::player_id, items::to_stack};
-use crate::{PlayerId, Server, items::ItemSpec, menus::MenuClick};
+use crate::{
+    PlayerId, Server,
+    items::ItemSpec,
+    menus::{MenuClick, MenuItemUpdate},
+};
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
@@ -18,6 +22,7 @@ use steel_core::{
     },
     inventory::{
         container::{Container, SimpleContainer},
+        lock::ContainerRef,
         menu::kinds::display_chest,
     },
     player::Player,
@@ -128,13 +133,53 @@ pub(crate) fn set_menu_item(
         .ok_or("the player has no extension menu open")?;
     let stack = to_stack(item)?;
     let mut container = container.lock();
-    let index = usize::try_from(slot)
-        .ok()
-        .filter(|index| *index < container.get_container_size())
-        .ok_or_else(|| format!("menu slot {slot} is out of range"))?;
+    let index = menu_slot(slot, container.get_container_size())?;
     container.set_item(index, stack);
     container.set_changed();
     Ok(())
+}
+
+pub(crate) fn update_menu(
+    server: &CoreServer,
+    player: PlayerId,
+    id: u64,
+    updates: &[MenuItemUpdate],
+) -> Result<bool, String> {
+    let Ok(player) = super::players::find(server, player) else {
+        return Ok(false);
+    };
+    let Some(container_id) = player.open_container_id() else {
+        return Ok(false);
+    };
+    let Some(container) = OPEN_MENUS
+        .lock()
+        .get(&key(&player, i32::from(container_id)))
+        .filter(|menu| menu.id == id)
+        .map(|menu| Arc::clone(&menu.container))
+    else {
+        return Ok(false);
+    };
+    if updates.is_empty() {
+        return Ok(true);
+    }
+    let size = container.lock().get_container_size();
+    let stacks = updates
+        .iter()
+        .map(|update| Ok((menu_slot(update.slot, size)?, to_stack(&update.item)?)))
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut container = container.lock();
+    for (index, stack) in stacks {
+        container.set_item(index, stack);
+    }
+    container.set_changed();
+    Ok(true)
+}
+
+fn menu_slot(slot: i32, size: usize) -> Result<usize, String> {
+    usize::try_from(slot)
+        .ok()
+        .filter(|&index| index < size)
+        .ok_or_else(|| format!("menu slot {slot} is out of range"))
 }
 
 pub(crate) fn close_menu(server: &CoreServer, id: PlayerId) -> Result<(), String> {
@@ -149,6 +194,18 @@ pub(crate) fn close_menu(server: &CoreServer, id: PlayerId) -> Result<(), String
     }
     player.close_container();
     Ok(())
+}
+
+pub(crate) fn close_menu_instance(server: &CoreServer, id: PlayerId, menu: u64) -> bool {
+    let Ok(player) = super::players::find(server, id) else {
+        return false;
+    };
+    let container = OPEN_MENUS
+        .lock()
+        .range(entries_of(&player))
+        .find(|(_, open)| open.id == menu)
+        .map(|(_, open)| ContainerRef::from(&open.container));
+    container.is_some_and(|container| player.close_container_using(container))
 }
 
 struct ClickRouter;

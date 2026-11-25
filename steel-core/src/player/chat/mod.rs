@@ -633,7 +633,7 @@ impl Player {
 
     /// Sends an overlay system message to the player
     pub fn send_overlay_message(&self, text: &TextComponent) {
-        self.send_packet(CSystemChat::new(text, true, self));
+        self.send_transient_overlay(CSystemChat::new(text, true, self));
     }
 
     /// Sends vanilla's red upper build-height limit overlay.

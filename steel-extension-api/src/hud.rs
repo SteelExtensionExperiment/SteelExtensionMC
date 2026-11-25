@@ -3,8 +3,13 @@
 //! The owner configures layout under `server.hud` and resolves overflow explicitly.
 
 use crate::{PlayerId, Server, players::Uuid};
-use stabby::{str::Str, string::String as ApiString, vec::Vec as ApiVec};
+use stabby::{
+    option::Option as ApiOption, str::Str, string::String as ApiString, vec::Vec as ApiVec,
+};
 use std::sync::OnceLock;
+
+mod sprites;
+pub use sprites::{HudGauge, HudIcon, HudSprites};
 
 /// A source registered under the calling extension's identity.
 #[stabby::stabby]
@@ -30,6 +35,34 @@ fn default_source() -> Result<Source, ApiString> {
         .get()
         .copied()
         .ok_or_else(|| "HUD is unavailable before extension pre-init".into())
+}
+
+/// A HUD template with an optional alternative for clients that loaded Steel's resource pack.
+#[stabby::stabby]
+#[derive(Debug, Clone)]
+pub struct HudText {
+    /// Plain or JSON text template for clients without the pack.
+    pub vanilla: ApiString,
+    /// Optional plain or JSON template for clients with the pack.
+    pub packed: ApiOption<ApiString>,
+}
+
+impl HudText {
+    /// Uses the same text template in both client modes.
+    #[must_use]
+    pub fn new(template: &str) -> Self {
+        Self {
+            vanilla: template.into(),
+            packed: ApiOption::None(),
+        }
+    }
+
+    /// Sets the text template that may reference fonts contributed to the server pack.
+    #[must_use]
+    pub fn with_resource_pack(mut self, template: &str) -> Self {
+        self.packed = Some(template.into()).into();
+        self
+    }
 }
 
 /// Vanilla boss bar color.
@@ -120,7 +153,7 @@ impl BossBar {
 #[stabby::host_api]
 /// HUD bindings on `Server`.
 pub mod api {
-    use super::{BossBar, Source};
+    use super::{BossBar, HudText, Source};
     use crate::{ApiResult, ExtensionContext, Hooks, PlayerId, Server, players::Uuid};
     use stabby::{str::Str, string::String as ApiString, vec::Vec as ApiVec};
 
@@ -167,6 +200,19 @@ pub mod api {
                 .into()
         }
 
+        /// Publishes sidebar templates with optional packed alternatives for the title and each line.
+        pub fn set_sidebar_with_pack(
+            &self,
+            server: &Server<'_>,
+            player: PlayerId,
+            title: HudText,
+            lines: ApiVec<HudText>,
+        ) -> ApiResult<()> {
+            host::set_sidebar_with_pack(server.host(), *self, player, &title, &lines)
+                .map_err(ApiString::from)
+                .into()
+        }
+
         /// Removes only this source's sidebar section.
         pub fn clear_sidebar(&self, server: &Server<'_>, player: PlayerId) -> ApiResult<()> {
             host::clear_sidebar(server.host(), *self, player)
@@ -182,9 +228,31 @@ pub mod api {
             id: Uuid,
             bar: BossBar,
         ) -> ApiResult<()> {
-            host::set_boss_bar(server.host(), *self, player, id, &bar, None)
+            host::set_boss_bar(server.host(), *self, player, id, &bar, None, None)
                 .map_err(ApiString::from)
                 .into()
+        }
+
+        /// Shows a boss bar with an alternative title for clients that loaded the pack.
+        pub fn set_boss_bar_with_pack(
+            &self,
+            server: &Server<'_>,
+            player: PlayerId,
+            id: Uuid,
+            bar: BossBar,
+            packed_title: Str<'_>,
+        ) -> ApiResult<()> {
+            host::set_boss_bar(
+                server.host(),
+                *self,
+                player,
+                id,
+                &bar,
+                None,
+                Some(packed_title.as_str()),
+            )
+            .map_err(ApiString::from)
+            .into()
         }
 
         /// Publishes a boss bar whose progress follows a gauge compound.
@@ -196,9 +264,40 @@ pub mod api {
             bar: BossBar,
             gauge: Str<'_>,
         ) -> ApiResult<()> {
-            host::set_boss_bar(server.host(), *self, player, id, &bar, Some(gauge.as_str()))
-                .map_err(ApiString::from)
-                .into()
+            host::set_boss_bar(
+                server.host(),
+                *self,
+                player,
+                id,
+                &bar,
+                Some(gauge.as_str()),
+                None,
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
+
+        /// Shows a data-driven boss bar with an alternative title for clients that loaded the pack.
+        pub fn set_gauge_bar_with_pack(
+            &self,
+            server: &Server<'_>,
+            player: PlayerId,
+            id: Uuid,
+            bar: BossBar,
+            gauge: Str<'_>,
+            packed_title: Str<'_>,
+        ) -> ApiResult<()> {
+            host::set_boss_bar(
+                server.host(),
+                *self,
+                player,
+                id,
+                &bar,
+                Some(gauge.as_str()),
+                Some(packed_title.as_str()),
+            )
+            .map_err(ApiString::from)
+            .into()
         }
 
         /// Removes only this source's bar with this local UUID.
@@ -232,9 +331,41 @@ pub mod api {
             .into()
         }
 
+        /// Publishes a tab section with optional packed alternatives for the header and footer.
+        pub fn set_tab_list_with_pack(
+            &self,
+            server: &Server<'_>,
+            player: PlayerId,
+            header: HudText,
+            footer: HudText,
+        ) -> ApiResult<()> {
+            host::set_tab_list_with_pack(server.host(), *self, player, &header, &footer)
+                .map_err(ApiString::from)
+                .into()
+        }
+
         /// Removes only this source's tab section.
         pub fn clear_tab_list(&self, server: &Server<'_>, player: PlayerId) -> ApiResult<()> {
             host::clear_tab_list(server.host(), *self, player)
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Publishes an action-bar template, with optional artwork for packed clients.
+        pub fn set_action_bar(
+            &self,
+            server: &Server<'_>,
+            player: PlayerId,
+            template: HudText,
+        ) -> ApiResult<()> {
+            host::set_action_bar(server.host(), *self, player, Some(&template))
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Removes this source's persistent action-bar contribution.
+        pub fn clear_action_bar(&self, server: &Server<'_>, player: PlayerId) -> ApiResult<()> {
+            host::set_action_bar(server.host(), *self, player, None)
                 .map_err(ApiString::from)
                 .into()
         }

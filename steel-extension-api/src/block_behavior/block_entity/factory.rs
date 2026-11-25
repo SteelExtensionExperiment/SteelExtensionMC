@@ -93,6 +93,28 @@ pub mod api {
     }
 
     impl BlockEntityCreation {
+        /// Creates the native inventory entity registered for this storage block.
+        #[must_use]
+        pub fn storage(level: WeakWorld, pos: BlockPos, state: BlockState) -> Self {
+            let state = core_types::BlockStateId(state.id);
+            let types = &REGISTRY.block_entity_types;
+            let Some(kind) = types.by_key(&state.get_block().key).filter(|kind| {
+                types.storage_capacity(kind).is_some() && kind.is_valid(state.get_block())
+            }) else {
+                return Self::no_entity();
+            };
+            let entity = steel_core::block_entity::BLOCK_ENTITIES.create(
+                kind,
+                level.into_host(),
+                core_types::BlockPos::new(pos.x, pos.y, pos.z),
+                state,
+            );
+            Self::from_host(entity.map_or(
+                core_types::BlockEntityCreation::NoEntity,
+                core_types::BlockEntityCreation::Created,
+            ))
+        }
+
         /// Returns a successfully created entity to the host.
         #[must_use]
         pub fn created(entity: BlockEntity) -> Self {
@@ -115,6 +137,15 @@ pub mod api {
     }
 
     impl BlockEntityTicker {
+        /// Selects the fallback display resolver registered for a storage block.
+        #[must_use]
+        pub fn for_storage_display(key: Str<'_>) -> ApiResult<Self> {
+            crate::host::storage::display::ticker(key.as_str())
+                .map(Self::from_host)
+                .map_err(ApiString::from)
+                .into()
+        }
+
         /// Selects the entity's tick callback for this exact registered entity type.
         #[must_use]
         pub fn for_entity_tick(key: Str<'_>) -> ApiResult<Self> {

@@ -2,11 +2,11 @@
 
 Status: both independent gameplay examples are implemented and integration-tested. Player data is per gameplay domain. Elemental spells
 create world effects and temporary terrain; projectiles and spell behavior are
-custom. These systems have separate modules. All HUD presentation must work
-with an unmodified vanilla client and no resource pack.
+custom. These systems have separate modules. HUD sources provide a vanilla
+presentation and can supply artwork for clients that load the optional pack.
 
 Implemented foundations: shared namespaced typed entity/player compounds, atomic numeric
-updates, domain-save persistence, owned sidebar/tab/boss-bar composition, data
+updates, domain-save persistence, owned sidebar, action bar, tab and boss-bar composition, data
 templates and aliases, owner layout policy, and custom projectile impacts using
 native thrown-item physics, chunk-persisted temporary terrain, world effects,
 and owned native creature capture/deployment/combat. See [the current API](player-data-and-hud.md),
@@ -73,7 +73,7 @@ represent changing maximum mana without assuming a fixed range. Formatting must
 preserve value types until rendering and escape data inserted into rich text.
 
 Each extension supplies usable default bindings and presentation. Owner layout
-can move the same data between sidebar, boss bars, and tab sections without
+can move the same data between sidebar, action bar, boss bars, and tab sections without
 requiring changes to either extension.
 
 ## Creature capture example
@@ -102,8 +102,8 @@ speed and durations are configurable. Area spells use the documented two-block
 query cube; the earth wall uses a fixed three-by-three shape in this example.
 
 Mana and active protection state live in player compounds. Publish the mana
-gauge and a default sidebar section with current/maximum mana and a text meter
-through the shared HUD. Damage protections must inspect
+gauge and a default action bar with current/maximum mana and a meter above
+armor through the shared HUD. Damage protections must inspect
 the actual damage source instead of guessing from the attacker's entity type.
 
 Fire, earth and water affect the world and create temporary terrain. Custom

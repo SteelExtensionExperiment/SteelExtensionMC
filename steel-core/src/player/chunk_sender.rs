@@ -12,14 +12,14 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use super::client_blocks::ClientBlockDisplays;
+use super::client_blocks::{BlockVisual, ClientBlockDisplays};
 use steel_protocol::packet_traits::{ClientPacket, CompressionInfo, EncodedPacket};
 use steel_protocol::packets::game::{
     CChunkBatchFinished, CChunkBatchStart, CForgetLevelChunk, CLevelChunkWithLight,
 };
 use steel_protocol::utils::ConnectionProtocol;
 use steel_utils::locks::SyncMutex;
-use steel_utils::{BlockPos, BlockStateId, ChunkPos, PackedChunkPos};
+use steel_utils::{ChunkPos, PackedChunkPos};
 
 use crate::{
     chunk::{
@@ -148,7 +148,7 @@ pub struct PreparedBatch {
 pub struct EncodedChunk {
     pos: ChunkPos,
     packet: EncodedPacket,
-    client_blocks: Arc<[(BlockPos, BlockStateId)]>,
+    client_blocks: Arc<[BlockVisual]>,
     content_revision: u64,
     holder: Weak<ChunkHolder>,
     readiness: TickingReadinessSnapshot,
@@ -458,16 +458,15 @@ impl ChunkSender {
     /// Updates attachments only while this connection still owns the chunk.
     /// Queue the corresponding block packet before calling this under the same
     /// sender lock, so it cannot race a chunk commit or unload.
-    pub fn update_client_block(
+    pub(crate) fn update_client_block(
         &mut self,
         connection: &PlayerConnection,
-        pos: BlockPos,
-        state: BlockStateId,
+        visual: &BlockVisual,
     ) {
         if steel_registry::REGISTRY.client_content.has_blocks()
-            && self.is_chunk_sent(ChunkPos::from_block_pos(pos))
+            && self.is_chunk_sent(ChunkPos::from_block_pos(visual.pos))
         {
-            self.client_blocks.update(connection, pos, state);
+            self.client_blocks.update(connection, visual);
         }
     }
 

@@ -135,6 +135,7 @@ fn independent_examples_capture_cast_and_protect_on_a_vanilla_connection() -> Re
             hud::shared_scoreboard(&running, &fixture.world).await?;
             release::menu_release(&running, &fixture.world).await?;
             bats::capture_and_battle(&running, &fixture.world).await?;
+            hud::packed_scoreboard(&running).await?;
             Ok::<_, String>(())
         }
         .await;

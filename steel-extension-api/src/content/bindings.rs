@@ -4,14 +4,18 @@ pub mod api {
     #[cfg(feature = "host")]
     use crate::host::content::{self, ContentRegistration};
     use crate::{
-        ApiResult, BlockState, Registry,
+        ApiResult, BlockPos, BlockState, Registry, World,
         block_behavior::{DynBlockBehavior, OriginalBlockBehavior},
         content::{
             BedDefinition, BiomeDefinition, BlockDefinition, BlockItemDefinition, EntityDefinition,
-            FluidDefinition, ItemDefinition, RegisteredFluid, SlabMaterial, TextureFallback,
+            FluidDefinition, ItemDefinition, ItemDisplay, MultiblockDisplay, RegisteredFluid,
+            SlabMaterial, TextureFallback,
         },
     };
-    use stabby::{slice::Slice, str::Str, string::String as ApiString, vec::Vec as ApiVec};
+    use stabby::{
+        option::Option as ApiOption, slice::Slice, str::Str, string::String as ApiString,
+        vec::Vec as ApiVec,
+    };
 
     /// Exclusive access before the real item and block registries freeze.
     #[opaque]
@@ -34,7 +38,18 @@ pub mod api {
         /// This extension's TOML configuration.
         #[must_use]
         pub fn config(&self) -> ApiString {
-            self.host().config.into()
+            self.host().extension.config.as_str().into()
+        }
+
+        /// Reserves a local menu ID and returns its extension-owned asset prefix.
+        /// Call before registering the menu's generated assets.
+        pub fn claim_menu_assets(&mut self, id: Str<'_>) -> ApiResult<ApiString> {
+            self.host()
+                .extension
+                .claim_menu_assets(id.as_str())
+                .map(ApiString::from)
+                .map_err(ApiString::from)
+                .into()
         }
 
         /// Adds a namespaced asset under `assets/` to the combined server pack.
@@ -49,6 +64,7 @@ pub mod api {
         }
 
         /// Adds a PNG and creates a flat item model with the supplied namespaced key.
+        /// Menu model keys under `ui/` store their PNGs under `textures/ui/`.
         pub fn register_item_texture(
             &mut self,
             model: Str<'_>,
@@ -233,6 +249,65 @@ pub mod api {
                 .map_err(ApiString::from)
                 .into()
         }
+
+        /// Registers a placing item, custom behavior and a native persistent inventory type.
+        /// The behavior creates the backing entity with `BlockEntityCreation::storage`.
+        pub fn register_storage_block(
+            &mut self,
+            definition: BlockItemDefinition,
+            max_slots: u32,
+            factory: extern "C" fn(
+                Registry<'_>,
+                BlockState,
+                OriginalBlockBehavior,
+            ) -> ApiResult<DynBlockBehavior>,
+        ) -> ApiResult<BlockState> {
+            self.host_mut()
+                .register_block(Some(factory), |registry| {
+                    content::register_storage_block(registry, definition, max_slots)
+                })
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        /// Registers a display for a previously registered storage block.
+        /// When present, it replaces the block's ordinary displays for all clients.
+        /// The radius covers the neighboring blocks read by the resolver.
+        pub fn register_storage_display(
+            &mut self,
+            block: Str<'_>,
+            radius: u8,
+            resolve: extern "C" fn(World<'_>, BlockPos) -> ApiOption<ItemDisplay>,
+        ) -> ApiResult<()> {
+            crate::host::storage::display::register(
+                self.host_mut().registry,
+                block.as_str(),
+                radius,
+                resolve,
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
+
+        /// Substitutes one model for the assembled structure. The registered parts' ordinary
+        /// displays are sent to packed clients while those parts are outside an assembly.
+        pub fn register_multiblock_storage_display(
+            &mut self,
+            block: Str<'_>,
+            radius: u8,
+            parts: Slice<'_, BlockState>,
+            resolve: extern "C" fn(World<'_>, BlockPos) -> ApiOption<MultiblockDisplay>,
+        ) -> ApiResult<()> {
+            crate::host::storage::display::register_multiblock(
+                self.host_mut().registry,
+                block.as_str(),
+                radius,
+                parts.as_slice(),
+                resolve,
+            )
+            .map_err(ApiString::from)
+            .into()
+        }
     }
 
     impl<'a> crate::Hooks<'a> {
@@ -242,7 +317,18 @@ pub mod api {
             &mut self,
             callback: extern "C" fn(ContentRegistry<'_>) -> ApiResult<()>,
         ) -> ApiResult<()> {
-            content::subscribe(self.host_mut(), callback)
+            content::subscribe(self.host_mut(), move |registry| callback(registry))
+                .map_err(ApiString::from)
+                .into()
+        }
+
+        #[doc(hidden)]
+        pub fn register_content_callback(
+            &mut self,
+            callback: extern "C" fn(ContentRegistry<'_>, u64) -> ApiResult<()>,
+            token: u64,
+        ) -> ApiResult<()> {
+            content::subscribe(self.host_mut(), move |registry| callback(registry, token))
                 .map_err(ApiString::from)
                 .into()
         }

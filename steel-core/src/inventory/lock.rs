@@ -376,7 +376,7 @@ impl ContainerLockGuard {
 
     /// Runs a callback after releasing every container, then reacquires the
     /// same sources in deterministic order before returning.
-    pub(crate) fn run_unlocked<R>(&mut self, callback: impl FnOnce() -> R) -> R {
+    pub fn run_unlocked<R>(&mut self, callback: impl FnOnce() -> R) -> R {
         drop(mem::take(&mut self.guards));
         let result = callback();
         self.guards = self

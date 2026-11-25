@@ -5,7 +5,7 @@ use crate::{
     inventory::{
         click::Click,
         container::{Container, CraftingContainer, clear_or_count_matching_stack},
-        lock::{ContainerId, ContainerLockGuard},
+        lock::{ContainerId, ContainerLockGuard, ContainerRef},
         menu::{
             Menu,
             kinds::{INVENTORY_MENU_CONTAINER_ID, InventoryKind},
@@ -130,12 +130,11 @@ impl Player {
     fn run_deferred_menu_actions(&self, actions: Vec<DeferredMenuAction>) {
         for action in actions {
             match action {
-                DeferredMenuAction::Close { send_packet } => {
-                    if send_packet {
-                        self.close_container();
-                    } else {
-                        self.do_close_container();
-                    }
+                DeferredMenuAction::Close {
+                    send_packet,
+                    target,
+                } => {
+                    self.close_open_menu(send_packet, target);
                 }
                 DeferredMenuAction::Open(prepared) => {
                     self.execute_menu_open(*prepared);
@@ -755,7 +754,14 @@ impl Player {
     /// Based on Java's `ServerPlayer::closeContainer`.
     /// This sends a close packet to the client.
     pub fn close_container(&self) {
-        self.close_open_menu(true);
+        self.close_open_menu(true, None);
+    }
+
+    /// Closes the open menu only while it uses the supplied container.
+    /// A deferred close checks the same container again when it runs.
+    #[must_use]
+    pub fn close_container_using(&self, container: ContainerRef) -> bool {
+        self.close_open_menu(true, Some(container))
     }
 
     /// Internal close container logic without sending a packet.
@@ -763,7 +769,7 @@ impl Player {
     /// Based on Java's `ServerPlayer::doCloseContainer`.
     /// Called when the client sends a close packet or when opening a new menu.
     pub fn do_close_container(&self) {
-        self.close_open_menu(false);
+        self.close_open_menu(false, None);
     }
 
     /// Removes both the base inventory menu and any external menu.
@@ -866,20 +872,33 @@ impl Player {
         self.try_finish_terminal_menu_removal();
     }
 
-    fn close_open_menu(&self, send_packet: bool) {
+    fn close_open_menu(&self, send_packet: bool, target: Option<ContainerRef>) -> bool {
+        let expected = target.as_ref().map(ContainerRef::container_id);
         let menu = {
             let mut open_menu = self.open_menu.lock();
             if open_menu.terminal_removal.is_some() {
-                return;
+                return false;
             }
             if let Some(dispatch) = open_menu.dispatch.as_mut() {
-                dispatch
-                    .actions
-                    .push(DeferredMenuAction::Close { send_packet });
-                return;
+                if expected.is_some_and(|id| !dispatch.opened_containers.contains(&id)) {
+                    return false;
+                }
+                dispatch.actions.push(DeferredMenuAction::Close {
+                    send_packet,
+                    target,
+                });
+                return true;
+            }
+            if let Some(id) = expected
+                && !open_menu
+                    .menu
+                    .as_ref()
+                    .is_some_and(|menu| menu.kind().opened_containers().contains(&id))
+            {
+                return false;
             }
             let Some(menu) = open_menu.menu.take() else {
-                return;
+                return false;
             };
             open_menu.dispatch = Some(OpenMenuDispatch {
                 container_id: menu.container_id(),
@@ -906,6 +925,7 @@ impl Player {
                 container_id,
             },
         );
+        true
     }
 
     fn remove_open_menu(&self, menu: &mut Menu) {

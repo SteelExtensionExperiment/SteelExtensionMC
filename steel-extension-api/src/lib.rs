@@ -53,6 +53,18 @@ pub const API_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// An owned ABI-safe error result. Convert with `into()` to use ordinary Rust `?`.
 pub type ApiResult<T> = StableResult<T, StableString>;
 
+/// Converts an ABI result to the standard Rust result type for use with `?`.
+pub trait ApiResultExt<T> {
+    /// Converts the error to an owned Rust string.
+    fn into_result(self) -> Result<T, String>;
+}
+
+impl<T: stabby::abi::IDeterminantProvider<StableString>> ApiResultExt<T> for ApiResult<T> {
+    fn into_result(self) -> Result<T, String> {
+        self.match_owned(Ok, |error| Err(error.to_string()))
+    }
+}
+
 /// Binds the entire API atomically before any extension callback is installed.
 #[cfg(not(feature = "host"))]
 pub fn bind(bootstrap: Bootstrap) -> Result<(), BindError> {
@@ -181,8 +193,9 @@ pub enum LogLevel {
 /// Exports the extension descriptor and lifecycle entrypoints behind one checked bootstrap.
 ///
 /// `pre_init` receives [`Hooks`] and `init` receives [`ExtensionContext`]; both may return
-/// either [`ApiResult<()>`] or any `Result<(), E: Display>`. The name must match the
-/// `[package]` name of the extension's `extension.toml`.
+/// either [`ApiResult<()>`] or any `Result<(), E: Display>`. Omit `name` and `version`
+/// to use Cargo package metadata. If a package manifest overrides the name,
+/// put that same name in the descriptor.
 ///
 // Host builds have no extension bootstrap to export into, so the example only compiles for
 // extensions.
@@ -222,8 +235,23 @@ macro_rules! export_extension {
         }
     };
     (
-        name: $name:literal,
-        version: $version:literal,
+        depends: [$($depends:literal),* $(,)?],
+        soft_depends: [$($soft:literal),* $(,)?],
+        pre_init: $pre_init:path,
+        init: $init:path $(,)?
+    ) => {
+        $crate::export_extension! {
+            name: env!("CARGO_PKG_NAME"),
+            version: env!("CARGO_PKG_VERSION"),
+            depends: [$($depends),*],
+            soft_depends: [$($soft),*],
+            pre_init: $pre_init,
+            init: $init,
+        }
+    };
+    (
+        name: $name:expr,
+        version: $version:expr,
         depends: [$($depends:literal),* $(,)?],
         soft_depends: [$($soft:literal),* $(,)?],
         pre_init: $pre_init:path,
