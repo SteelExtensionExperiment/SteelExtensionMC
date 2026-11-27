@@ -5,6 +5,7 @@
 use std::backtrace::{Backtrace, BacktraceStatus};
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::process::ExitCode;
 use std::sync::Arc;
 use std::{env, panic, thread};
 
@@ -118,7 +119,7 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 // Windows defaults to a 1 MB main thread stack, which overflows in debug
 // builds due to deeply nested generated density functions.
-fn main() {
+fn main() -> ExitCode {
     #[cfg(all(windows, debug_assertions))]
     {
         thread::Builder::new()
@@ -127,12 +128,12 @@ fn main() {
             .spawn(steel_main)
             .expect("failed to spawn steel-main bootstrap thread")
             .join()
-            .expect("steel-main thread panicked");
+            .expect("steel-main thread panicked")
     }
 
     #[cfg(not(all(windows, debug_assertions)))]
     {
-        steel_main();
+        steel_main()
     }
 }
 
@@ -147,7 +148,7 @@ fn main() {
     clippy::unwrap_used,
     reason = "runtime build failures are fatal and unrecoverable at startup"
 )]
-fn steel_main() {
+fn steel_main() -> ExitCode {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
@@ -156,7 +157,7 @@ fn steel_main() {
         Ok(config) => config,
         Err(error) => {
             eprintln!("Failed to load configuration: {error}");
-            return;
+            return ExitCode::FAILURE;
         }
     };
 
@@ -185,24 +186,25 @@ fn steel_main() {
         .build()
         .unwrap();
 
-    main_runtime.block_on(main_async(Arc::clone(&chunk_runtime), steel_config));
+    let exit_code = main_runtime.block_on(main_async(Arc::clone(&chunk_runtime), steel_config));
 
     drop(main_runtime);
     drop(chunk_runtime);
+    exit_code
 }
 
 #[expect(
     clippy::too_many_lines,
     reason = "startup sequencing and error handling"
 )]
-async fn main_async(chunk_runtime: Arc<Runtime>, steel_config: config::SteelConfig) {
+async fn main_async(chunk_runtime: Arc<Runtime>, steel_config: config::SteelConfig) -> ExitCode {
     let cancel_token = CancellationToken::new();
 
     let logger = match init_tracing(cancel_token.clone(), steel_config.log.clone()).await {
         Ok(logger) => logger,
         Err(error) => {
             eprintln!("{error}");
-            return;
+            return ExitCode::FAILURE;
         }
     };
     log::info!(
@@ -291,19 +293,20 @@ async fn main_async(chunk_runtime: Arc<Runtime>, steel_config: config::SteelConf
     let run_result = AssertUnwindSafe(run_server(chunk_runtime, cancel_token, steel_config))
         .catch_unwind()
         .await;
-    let panic_payload = match run_result {
-        Ok(Ok(())) => None,
+    let exit_code = match run_result {
+        Ok(Ok(())) => Ok(ExitCode::SUCCESS),
         Ok(Err(error)) => {
             log::error!("Server startup failed: {error}");
-            None
+            Ok(ExitCode::FAILURE)
         }
-        Err(payload) => Some(payload),
+        Err(payload) => Err(payload),
     };
 
     logger.stop().await;
 
-    if let Some(payload) = panic_payload {
-        panic::resume_unwind(payload);
+    match exit_code {
+        Ok(code) => code,
+        Err(payload) => panic::resume_unwind(payload),
     }
 }
 

@@ -89,8 +89,13 @@ impl CommandLogger {
             log_config,
             interactive,
         });
+        if interactive {
+            task::spawn(Arc::clone(&log).interactive_input_main());
+        } else {
+            log.start_plain_input()
+                .map_err(|error| format!("failed to start console input: {error}"))?;
+        }
         task::spawn(Arc::clone(&log).log_loop(receiver));
-        task::spawn(Arc::clone(&log).input_main());
         STEEL_LOGGER
             .set(Arc::<CommandLogger>::clone(&log))
             .map_err(|_| "Steel logger is already initialized".to_string())?;
@@ -100,9 +105,10 @@ impl CommandLogger {
     /// Stops the logger and waits for cleanup to complete
     pub async fn stop(&self) {
         self.cancel_token.cancel();
-        if timeout(time::Duration::from_secs(1), self.stopped.cancelled())
-            .await
-            .is_err()
+        if self.interactive
+            && timeout(time::Duration::from_secs(1), self.stopped.cancelled())
+                .await
+                .is_err()
         {
             let _ = disable_raw_mode();
             self.stopped.cancel();

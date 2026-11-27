@@ -15,6 +15,7 @@ use std::{
     io::{Result, Write, stdin},
     mem,
     sync::Arc,
+    thread,
 };
 use steel_core::command::sender::CommandSender;
 use tokio::sync::RwLockWriteGuard;
@@ -29,12 +30,7 @@ enum ExtendedKey {
 }
 
 impl CommandLogger {
-    /// Main entry of the input process
-    pub async fn input_main(self: Arc<Self>) -> Result<()> {
-        if !self.interactive {
-            return self.plain_input_main().await;
-        }
-
+    pub(super) async fn interactive_input_main(self: Arc<Self>) -> Result<()> {
         let (tx, rx) = mpsc::unbounded_channel();
         enable_raw_mode()?;
         Arc::clone(&self).input_receiver(tx);
@@ -44,21 +40,22 @@ impl CommandLogger {
         result
     }
 
-    async fn plain_input_main(self: Arc<Self>) -> Result<()> {
+    pub(super) fn start_plain_input(&self) -> Result<()> {
         let cancel_token = self.cancel_token.clone();
-        spawn_blocking(move || {
-            for line in stdin().lines().map_while(Result::ok) {
-                if cancel_token.is_cancelled() {
-                    break;
+        // A blocking stdin read may outlive shutdown while a supervisor keeps the pipe open.
+        thread::Builder::new()
+            .name("console-input".to_owned())
+            .spawn(move || {
+                for line in stdin().lines().map_while(Result::ok) {
+                    if cancel_token.is_cancelled() {
+                        break;
+                    }
+                    let line = line.trim_end_matches('\r');
+                    if !line.trim().is_empty() {
+                        dispatch_command(line.to_owned());
+                    }
                 }
-                let line = line.trim_end_matches('\r');
-                if !line.trim().is_empty() {
-                    dispatch_command(line.to_owned());
-                }
-            }
-        });
-        self.cancel_token.cancelled().await;
-        self.stopped.cancel();
+            })?;
         Ok(())
     }
 

@@ -38,7 +38,7 @@ use steel_core::{
 };
 use steel_extension_api::host;
 use steel_protocol::packet_traits::EncodedPacket;
-use steel_protocol::packets::game::{CPlayerInfoUpdate, PlayerAction, SPlayerAction};
+use steel_protocol::packets::game::{CPlayerInfoUpdate, CSystemChat, PlayerAction, SPlayerAction};
 use steel_protocol::utils::ConnectionProtocol;
 use steel_registry::blocks::properties::Direction;
 use steel_registry::vanilla_game_rules::NATURAL_HEALTH_REGENERATION;
@@ -55,9 +55,11 @@ use steel_utils::{
 use text_components::TextComponent;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::oneshot;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+const WAIT_TIMEOUT: Duration = Duration::from_secs(25);
 
 #[derive(Default)]
 struct PeerConnection {
@@ -207,7 +209,7 @@ async fn until(
     label: &str,
     condition: impl Fn() -> bool,
 ) -> Result<(), String> {
-    let deadline = Instant::now() + Duration::from_secs(25);
+    let deadline = Instant::now() + WAIT_TIMEOUT;
     while Instant::now() < deadline {
         // A real peer sends this signal after each respawn/world load.
         player.set_client_loaded(true);
@@ -227,6 +229,49 @@ async fn until(
         player.is_domain_switching()
     ))
 }
+
+async fn wait_for_spleef_ready(
+    server: &Server,
+    player: &Arc<Player>,
+    sent_packets: &SyncMutex<Vec<EncodedPacket>>,
+) -> Result<(), String> {
+    let ready = EncodedPacket::from_bare(
+        CSystemChat::new(
+            &TextComponent::plain(
+                "Spleef: ready; 0/4 human players. /spleef join | leave | status",
+            ),
+            false,
+            player.as_ref(),
+        ),
+        None,
+        ConnectionProtocol::Play,
+    )
+    .map_err(|error| error.to_string())?;
+
+    timeout(WAIT_TIMEOUT, async {
+        // The room can still be retiring after both worlds have been dropped.
+        loop {
+            server
+                .submit_command(
+                    CommandSender::Player(Arc::clone(player)),
+                    "spleef status".into(),
+                    None,
+                )
+                .map_err(|_| "command queue full")?;
+            on_tick(server, || Ok(())).await?;
+            if sent_packets
+                .lock()
+                .iter()
+                .any(|packet| packet.encoded_data.as_slice() == ready.encoded_data.as_slice())
+            {
+                return Ok(());
+            }
+        }
+    })
+    .await
+    .map_err(|_| "Spleef did not report ready after world cleanup".to_owned())?
+}
+
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -478,6 +523,7 @@ fn solo_spleef_creates_lobby_and_arena_fills_bots_restores_state_and_releases_wo
             lobby_weak.upgrade().is_none() && arena_weak.upgrade().is_none()
         })
         .await?;
+        wait_for_spleef_ready(&server, &player, &sent_packets).await?;
         // Leaving during creation must also clean up an eventual prepared lobby.
         server
             .submit_command(
